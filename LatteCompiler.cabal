@@ -17,6 +17,6 @@ executable LatteCompiler
   main-is:              Main.hs
   -- other-modules:
   -- other-extensions:
-  build-depends:        array, base >= 4.7 && < 5, control-bool, containers, extra, mtl, transformers
+  build-depends:        array, base >= 4.7 && < 5, control-bool, containers, extra, monad-loops, mtl, transformers
   hs-source-dirs:       src
   default-language:     Haskell2010
