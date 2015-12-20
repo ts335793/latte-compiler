@@ -2,7 +2,436 @@
 
 module SemanticAnalysis where
 
-import           BNFC.AbsLatte       hiding (Type)
+import           BNFC.AbsLatte        hiding (Type)
+import qualified BNFC.AbsLatte        as Abs
+import           Control.Conditional  (if')
+import           Control.Monad.Except
+import           Control.Monad.Extra
+import           Control.Monad.State  hiding (State)
+import qualified Control.Monad.State  as St
+import           Data.Foldable
+import           Data.List.Utils
+import           Data.Map             (Map)
+import qualified Data.Map             as M
+import           Data.Set             (Set)
+import qualified Data.Set             as S
+
+-- position
+
+type Position = (Int, Int)
+
+-- error
+
+data Error = ErrorAt Position String
+           | ErrorNear Position String
+           deriving Eq
+
+instance Ord Error where
+     x <= y = errorPosition x <= errorPosition y
+
+instance Show Error where
+    show (ErrorAt (l, c) m) = "At line: " ++ show l ++ ", position: " ++ show c ++ "\n\t" ++ m
+    show (ErrorNear (l, c) m) = "Near line: " ++ show l ++ ", position: " ++ show c ++ "\n\t" ++ m
+
+errorPosition :: Error -> Position
+errorPosition (ErrorAt p _) = p
+errorPosition (ErrorNear p _) = p
+
+-- type
+
+data HandSide = LHS | RHS
+
+data Type = TInt
+          | TString
+          | TBool
+          | TVoid
+          | TObj String
+          | TArr Type
+          | TFun [Type] Type
+
+instance Show Type where
+    show TInt = "int"
+    show TString = "string"
+    show TBool = "boolean"
+    show TVoid = "void"
+    show (TObj c) = c
+    show (TArr t) = show t ++ "[]"
+    show (TFun argts rt) = foldr (\argt s -> show argt ++ " -> " ++ s) (show rt) argts
+
+instance Read Type where
+    readsPrec _ "int" = [(TInt, "")]
+    readsPrec _ "string" = [(TString, "")]
+    readsPrec _ "boolean" = [(TBool, "")]
+    readsPrec _ "void" = [(TVoid, "")]
+    readsPrec _ s
+        | endswith "[]" s = [(TArr $ read $ take (length s - 2) s, "")]
+        | otherwise = [(TObj s, "")]
+
+bnfcTypeToTypePosition :: Abs.Type -> (Type, Position)
+bnfcTypeToTypePosition (TSingle (PIdent (p, i))) = (read i, p)
+bnfcTypeToTypePosition (TArray (PIdent (p, i))) = (read $ i ++ "[]", p)
+
+bnfcTypeToType :: Abs.Type -> Type
+bnfcTypeToType bt = fst $ bnfcTypeToTypePosition bt
+
+object :: Type
+object = TObj "object"
+
+isCallable :: Type -> Bool
+isCallable (TFun _ _) = True
+isCallable _ = False
+
+isCreateable :: Type -> Bool
+isCreateable TVoid = True
+isCreateable _ = False
+
+isArray :: Type -> Bool
+isArray (TArr _) = True
+isArray _ = False
+
+arrayFieldType :: Type -> Type
+arrayFieldType (TArr t) = t
+
+-- state
+
+data Field = Field {
+    fieldType     :: Type,
+    fieldPosition :: Position
+}
+
+data Function = Function {
+    arguments        :: [(String, Field)],
+    body             :: Block,
+    functionType     :: Type,
+    functionPosition :: Position
+}
+
+data Virtual = Virtual {
+    virtualType     :: Type,
+    virtualPosition :: Position
+}
+
+data Class = Class {
+    superclass    :: Maybe String,
+    fields        :: Map String Field,
+    methods       :: Map String Function,
+    virtuals      :: Map String Virtual,
+    classPosition :: Position
+}
+
+data State = State {
+    lastPosition :: Position,
+    currentClass :: Maybe String,
+    frames       :: [Map String Field],
+    functions    :: Map String Function,
+    classes      :: Map String Class
+}
+
+type CM = ExceptT [Error] (St.State State)
+
+-- getters
+
+errorNear :: String -> CM Error
+errorNear s = do
+    p <- getLastPosition
+    return $ ErrorNear p s
+
+getLastPosition :: CM Position
+getLastPosition = lastPosition <$> get
+
+getCurrentClass :: CM (Maybe String)
+getCurrentClass = currentClass <$> get
+
+getFrames :: CM [Map String Field]
+getFrames = frames <$> get
+
+getLocal :: String -> CM Field
+getLocal l = do
+    Just m <- find (M.member l) <$> getFrames
+    return $ m M.! l
+
+getFunctions :: CM (Map String Function)
+getFunctions = functions <$> get
+
+getFunction :: String -> CM Function
+getFunction f = (M.! f) <$> getFunctions
+
+getClasses :: CM (Map String Class)
+getClasses = classes <$> get
+
+getClass :: String -> CM Class
+getClass c = (M.! c) <$> getClasses
+
+getSuperclass :: String -> CM (Maybe String)
+getSuperclass c = superclass <$> getClass c
+
+getSuperclasses :: String -> CM (Set String)
+getSuperclasses c = do
+    ms <- getSuperclass c
+    case ms of
+        Nothing -> return $ S.singleton c
+        Just s -> S.insert c <$> getSuperclasses s
+
+getFields :: String -> CM (Map String Field)
+getFields c = fields <$> getClass c
+
+getFieldsT :: Type -> CM (Map String Field)
+getFieldsT (TObj c) = getFields c
+getFieldsT (TArr c) = return $ M.singleton "length" (Field TInt (-1, -1))
+getFieldsT _ = return M.empty
+
+getFieldT :: Type -> String -> CM Field
+getFieldT t f = (M.! f) <$> getFieldsT t
+
+getVirtuals :: String -> CM (Map String Virtual)
+getVirtuals c = virtuals <$> getClass c
+
+getVirtualsT :: Type -> CM (Map String Virtual)
+getVirtualsT (TObj c) = getVirtuals c
+getVirtualsT _ = return M.empty
+
+getVirtual :: String -> String -> CM Virtual
+getVirtual c v = (M.! v) <$> getVirtuals c
+
+getVirtualT :: Type -> String -> CM Virtual
+getVirtualT t v = (M.! v) <$> getVirtualsT t
+
+getCurrentClassVirtual :: String -> CM Virtual
+getCurrentClassVirtual v = do
+    Just c <- getCurrentClass
+    getVirtual c v
+
+-- setters
+
+-- conditions
+
+isProperType :: Type -> CM Bool
+isProperType TInt = return True
+isProperType TString = return True
+isProperType TBool = return True
+isProperType TVoid = return True
+isProperType (TObj c) = isClass c
+isProperType (TArr t) = isProperType t
+isProperType (TFun argts rt) = allM isProperType argts &&^ isProperType rt
+
+isSubclass :: String -> String -> CM Bool
+isSubclass c1 c2 = S.member c2 <$> getSuperclasses c1
+
+isSubtype :: Type -> Type -> CM Bool
+isSubtype TInt TInt = return True
+isSubtype TString TString = return True
+isSubtype TBool TBool = return True
+isSubtype TVoid TVoid = return True
+isSubtype (TObj c1) (TObj c2) = isSubclass c1 c2
+isSubtype (TArr t1) (TArr t2) = isSubtype t1 t2
+isSubtype (TFun args1 r1) (TFun args2 r2) =
+    pure (length args1 == length args2) &&^
+    allM (\(t1, t2) -> isSubtype t2 t1) (zip args1 args2) &&^
+    isSubtype r1 r2
+isSubtype _ _ = return False
+
+inClass :: CM Bool
+inClass = (Nothing /=) <$> getCurrentClass
+
+isLocal :: String -> CM Bool
+isLocal l = any (M.member l) <$> getFrames
+
+isFunction :: String -> CM Bool
+isFunction f = M.member f <$> getFunctions
+
+isClass :: String -> CM Bool
+isClass c = M.member c <$> getClasses
+
+hasFieldT :: Type -> String -> CM Bool
+hasFieldT t f = M.member f <$> getFieldsT t
+
+hasVirtual :: String -> String -> CM Bool
+hasVirtual c v = M.member v <$> getVirtuals c
+
+hasVirtualT :: Type -> String -> CM Bool
+hasVirtualT t f = M.member f <$> getVirtualsT t
+
+hasCurrentClassVirtual :: String -> CM Bool
+hasCurrentClassVirtual v = do
+    Just c <- getCurrentClass
+    hasVirtual c v
+
+-- modifiers
+
+updateLastPosition :: Position -> CM ()
+updateLastPosition p = modify (\st -> st { lastPosition = p })
+
+at :: Position -> String -> CM ()
+at p s = throwError [ErrorAt p s]
+
+near :: String -> CM ()
+near s = do
+    ex <- errorNear s
+    throwError [ex]
+
+-- checkers
+
+checkAt :: Position -> Bool -> String -> CM ()
+checkAt p b s = unless b (at p s)
+
+checkAtM :: Position -> CM Bool -> String -> CM ()
+checkAtM p b s = unlessM b (at p s)
+
+checkNear :: Bool -> String -> CM ()
+checkNear b s = unless b (near s)
+
+checkNearM :: CM Bool -> String -> CM ()
+checkNearM b s = unlessM b (near s)
+
+-- check expression type
+
+collectCheckExprTypeErrors :: [(Expr, Type)] -> CM [Error]
+collectCheckExprTypeErrors [] = return []
+collectCheckExprTypeErrors ((e, t):xs) = do
+    es1 <- collectCheckExprTypeErrors xs
+    es2 <- (do checkExprType e t; return []) `catchError` return
+    return $ es2 ++ es1
+
+raiseCheckExprTypeErrorsOrReturn :: [(Expr, Type)] -> a -> CM a
+raiseCheckExprTypeErrorsOrReturn xs r = do
+    exs <- collectCheckExprTypeErrors xs
+    case exs of
+        [] -> return r
+        _ -> throwError exs
+
+checkExprType :: Expr -> Type -> CM ()
+checkExprType ELitTrue t = return ()
+
+-- get expression type
+
+checkFunctionCallAt :: Position -> String -> [Type] -> [Expr] -> CM ()
+checkFunctionCallAt p i argts es = do
+    updateLastPosition p
+    if' (length argts == length es)
+        (do exs <- collectCheckExprTypeErrors $ zip es argts
+            case exs of
+                [] -> return ()
+                _ -> throwError exs)
+        (do let ex = ErrorAt p ("Wrong number of parameters in " ++ i ++ " call.")
+            exs <- collectGetExprTypeErrors es
+            throwError $ ex : exs)
+
+getNewTypeAt :: Position -> String -> CM (Type, HandSide)
+getNewTypeAt p i = do
+    updateLastPosition p
+    let t = read i
+    checkAtM p (isProperType t &&^ pure (isCreateable t)) (show t ++ " is not proper type.")
+    return (t, LHS)
+
+getCastTypeAt :: Position -> Type -> Expr -> CM (Type, HandSide)
+getCastTypeAt p nt e = do
+    updateLastPosition p
+    ifM (isProperType nt)
+        (do (t, hs) <- getExprType e
+            checkAtM p (notM $ isSubtype nt t ||^ isSubtype t nt) ("Cannot cast " ++ show t ++ " to " ++ show nt ++ ".")
+            return (nt, hs))
+        (do let ex = ErrorAt p (show nt ++ " is not a proper type.")
+            exs <- collectGetExprTypeErrors [e]
+            throwError $ ex : exs)
+
+checkEqualTypeExpr :: Expr -> Expr -> CM Bool
+checkEqualTypeExpr e1 e2 = do
+    exs <- collectGetExprTypeErrors [e1, e2]
+    case exs of
+        [] -> do
+            (t1, _) <- getExprType e1
+            (t2, _) <- getExprType e2
+            return $ t1 == t2
+        _ -> throwError exs
+
+collectGetExprTypeErrors :: [Expr] -> CM [Error]
+collectGetExprTypeErrors [] = return []
+collectGetExprTypeErrors (x:xs) = do
+    exs1 <- collectGetExprTypeErrors xs
+    exs2 <- (getExprType x >> return []) `catchError` return
+    return $ exs2 ++ exs1
+
+getExprType :: Expr -> CM (Type, HandSide)
+getExprType (EVar (PIdent (p, i))) = do
+    updateLastPosition p
+    checkAtM p (isLocal i) (i ++ " is not defined.")
+    t <- fieldType <$> getLocal i
+    return (t, LHS)
+getExprType (ELitInt _) = return (TInt, RHS)
+getExprType (EString _) = return (TString, RHS)
+getExprType ELitTrue = return (TBool, RHS)
+getExprType ELitFalse = return (TBool, RHS)
+getExprType ENull = return (object, RHS)
+getExprType (ESelect e (PIdent (p, i))) = do
+    (t, _) <- getExprType e
+    updateLastPosition p
+    checkAtM p (hasFieldT t i) (show t ++ " has no field " ++ i ++ ".")
+    it <- fieldType <$> getFieldT t i
+    return (it, LHS)
+getExprType (EMetCall e (PIdent (p, i)) es) = do
+    (t, _) <- getExprType e `catchError` (\exs1 -> do
+        updateLastPosition p
+        exs2 <- collectGetExprTypeErrors es
+        throwError $ exs2 ++ exs1)
+    updateLastPosition p
+    ifM (hasVirtualT t i)
+        (do TFun argts rt <- virtualType <$> getVirtualT t i
+            checkFunctionCallAt p i argts es
+            return (rt, RHS))
+        (do let ex = ErrorAt p (show t ++ " has no method " ++ i ++ ".")
+            exs <- collectGetExprTypeErrors es
+            throwError $ ex : exs)
+getExprType (EAt e1 e2) = do
+    (t, _) <- getExprType e1 `catchError` (\exs1 -> do
+        exs2 <- collectCheckExprTypeErrors [(e2, TInt)]
+        throwError $ exs2 ++ exs1)
+    if' (isArray t)
+        (do checkExprType e2 TInt
+            return (arrayFieldType t, LHS))
+        (do ex <- errorNear (show t ++ " is not array type.")
+            exs <- collectCheckExprTypeErrors [(e2, TInt)]
+            throwError $ ex : exs)
+getExprType (EApp (PIdent (p, i)) es) = do
+    updateLastPosition p
+    ifM (inClass &&^ hasCurrentClassVirtual i)
+        (do TFun argts rt <- virtualType <$> getCurrentClassVirtual i
+            checkFunctionCallAt p i argts es
+            return (rt, RHS))
+        (ifM (isFunction i)
+            (do TFun argts rt <- functionType <$> getFunction i
+                checkFunctionCallAt p i argts es
+                return (rt, RHS))
+            (do let ex = ErrorAt p (i ++ " function is not defined.")
+                exs <- collectGetExprTypeErrors es
+                throwError $ ex : exs))
+getExprType (ENeg e) = checkExprType e TInt >> return (TInt, RHS)
+getExprType (ENot e) = checkExprType e TBool >> return (TBool, RHS)
+getExprType (EIncr e) = checkExprType e TInt >> return (TInt, RHS) -- TODO check lhs
+getExprType (EDecr e) = checkExprType e TInt >> return (TInt, RHS) -- TODO check rhs
+getExprType (ENewVar (PIdent (p, i))) = getNewTypeAt p i
+getExprType (ENewArr (PIdent (p, i)) e) = do
+    (t, hs) <- getNewTypeAt p (i ++ "[]") `catchError` (\exs1 -> do
+        exs2 <- collectCheckExprTypeErrors [(e, TInt)]
+        throwError $ exs2 ++ exs1)
+    checkExprType e TInt
+    return (t, hs)
+getExprType (ECastVar (PIdent (p, i)) e) = getCastTypeAt p (read i) e
+getExprType (ECastArr (PIdent (p, i)) e) = getCastTypeAt p (read $ i ++ "[]") e
+getExprType (EMul e1 _ e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TInt), (e2, TInt)] (TInt, RHS)
+getExprType (EAdd e1 Plus e2) = do
+    exsI <- collectCheckExprTypeErrors [(e1, TInt), (e2, TInt)]
+    exsS <- collectCheckExprTypeErrors [(e1, TString), (e2, TString)]
+    case (exsI, exsS) of
+        ([], _) -> return (TInt, RHS)
+        (_, []) -> return (TString, RHS)
+        _ -> throwError exsI
+getExprType (ERel e1 EQU e2) = whenM (checkEqualTypeExpr e1 e2)
+getExprType (ERel e1 NE e2) = checkEqualTypeExpr e1 e2
+getExprType (ERel e1 _ e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TInt), (e2, TInt)] (TInt, RHS)
+getExprType (EAnd e1 e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TBool), (e2, TBool)] (TBool, RHS)
+getExprType (EOr e1 e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TBool), (e2, TBool)] (TBool, RHS)
+
+{-import           BNFC.AbsLatte       hiding (Type)
 import qualified BNFC.AbsLatte       as Abs
 import           Control.Monad.Extra
 import           Control.Monad.State hiding (State)
@@ -660,3 +1089,4 @@ checkTypesInItem t (Init (PIdent (p, l)) e) = do
     checkM (isSubtype et t) ("Cannot assign value of type " ++ show t ++ " to variable " ++ l
                              ++ " of type " ++ show t ++ ".") p
     setLocal l t p-}
+-}

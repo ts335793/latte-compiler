@@ -64,9 +64,9 @@ SExp.      Stmt ::= Expr ";" ;
 
 -- Types ---------------------------------------------------
 
-TVar.      Type ::= PIdent ;
+TSingle.      Type ::= PIdent ;
 
-TArr.      Type ::= PIdent "[]" ;
+TArray.       Type ::= PIdent "[]" ;
 
 -- Expressions ---------------------------------------------
 
@@ -102,9 +102,9 @@ ENewVar.   Expr6 ::= "new" PIdent ;
 
 ENewArr.   Expr6 ::= "new" PIdent "[" Expr "]" ;
 
-ECastArr.  Expr5 ::= "(" PIdent "[]" ")" Expr5 ;
-
 ECastVar.  Expr5 ::= "(" PIdent ")" Expr5 ;
+
+ECastArr.  Expr5 ::= "(" PIdent "[]" ")" Expr5 ;
 
 EMul.      Expr4 ::= Expr4 MulOp Expr5 ;
 
