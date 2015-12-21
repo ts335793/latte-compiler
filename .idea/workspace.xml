@@ -2,7 +2,6 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="3cb52e21-351b-4f83-8a67-771e181d7771" name="Default" comment="">
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/LatteCompiler.cabal" afterPath="$PROJECT_DIR$/LatteCompiler.cabal" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/SemanticAnalysis.hs" afterPath="$PROJECT_DIR$/src/SemanticAnalysis.hs" />
     </list>
     <ignored path="LatteCompiler.iws" />
@@ -28,8 +27,8 @@
       <file leaf-file-name="SemanticAnalysis.hs" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/src/SemanticAnalysis.hs">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.70866144">
-              <caret line="428" column="0" selection-start-line="428" selection-start-column="0" selection-end-line="428" selection-end-column="0" />
+            <state vertical-scroll-proportion="-2.7984252">
+              <caret line="361" column="24" selection-start-line="361" selection-start-column="24" selection-end-line="361" selection-end-column="24" />
               <folding />
             </state>
           </provider>
@@ -959,14 +958,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/BNFC/AbsLatte.hs">
-      <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.0">
-          <caret line="49" column="5" selection-start-line="49" selection-start-column="5" selection-end-line="72" selection-end-column="19" />
-          <folding />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/src/Latte.cf">
       <provider selected="true" editor-type-id="text-editor">
         <state vertical-scroll-proportion="-17.535715">
@@ -983,10 +974,18 @@
         </state>
       </provider>
     </entry>
+    <entry file="file://$PROJECT_DIR$/src/BNFC/AbsLatte.hs">
+      <provider selected="true" editor-type-id="text-editor">
+        <state vertical-scroll-proportion="0.0">
+          <caret line="49" column="5" selection-start-line="49" selection-start-column="5" selection-end-line="72" selection-end-column="19" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
     <entry file="file://$PROJECT_DIR$/src/SemanticAnalysis.hs">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.70866144">
-          <caret line="428" column="0" selection-start-line="428" selection-start-column="0" selection-end-line="428" selection-end-column="0" />
+        <state vertical-scroll-proportion="-2.7984252">
+          <caret line="361" column="24" selection-start-line="361" selection-start-column="24" selection-end-line="361" selection-end-column="24" />
           <folding />
         </state>
       </provider>

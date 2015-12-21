@@ -41,6 +41,11 @@ errorPosition (ErrorNear p _) = p
 -- type
 
 data HandSide = LHS | RHS
+              deriving Eq
+
+instance Show HandSide where
+    show LHS = "l-value"
+    show RHS = "r-value"
 
 data Type = TInt
           | TString
@@ -287,11 +292,53 @@ checkNearM b s = unlessM b (near s)
 
 -- check expression type
 
+typeError :: (Type, HandSide) -> (Type, HandSide) -> String
+typeError (et, ehs) (it, ihs) = "Couldn't match expected " ++ show ehs ++ " " ++ show et ++ " against interfered " ++ show ihs ++ " " ++ show it ++ "."
+
 checkExprTypeErrors :: Expr -> Type -> HandSide -> CM [Error]
 checkExprTypeErrors e hs t = (checkExprType e hs t >> return []) `catchError` return
 
+checkExprTypeHelperAt :: Position -> Expr -> Type -> HandSide -> CM ()
+checkExprTypeHelperAt p e t LHS = do
+    updateLastPosition p
+    (t', hs') <- getExprType e
+    checkAtM p (pure (hs' == LHS) &&^ isSubtype t' t) (typeError (t, LHS) (t', hs'))
+checkExprTypeHelperAt p e t RHS = do
+    (t', hs') <- getExprType e
+    checkAtM p (isSubtype t' t) (typeError (t, RHS) (t', hs'))
+
+checkExprTypeHelperNear :: Expr -> Type -> HandSide -> CM ()
+checkExprTypeHelperNear e t LHS = do
+    (t', hs') <- getExprType e
+    checkNearM (pure (hs' == LHS) &&^ isSubtype t' t) (typeError (t, LHS) (t', hs'))
+checkExprTypeHelperNear e t RHS = do
+    (t', hs') <- getExprType e
+    checkNearM (isSubtype t' t) (typeError (t, RHS) (t', hs'))
+
 checkExprType :: Expr -> Type -> HandSide -> CM ()
-checkExprType ELitTrue t hs = return () -- TODO wrong
+checkExprType e@(EVar (PIdent (p, _))) = checkExprTypeHelperAt p e
+checkExprType e@(ELitInt _) = checkExprTypeHelperNear e
+checkExprType e@(EString _) = checkExprTypeHelperNear e
+checkExprType e@(ELitTrue) = checkExprTypeHelperNear e
+checkExprType e@(ELitFalse) = checkExprTypeHelperNear e
+checkExprType e@(ENull) = checkExprTypeHelperNear e
+checkExprType e@(ESelect _ (PIdent (p, _))) = checkExprTypeHelperAt p e
+checkExprType e@(EMetCall _ (PIdent (p, _)) _) = checkExprTypeHelperAt p e
+checkExprType e@(EAt _ _) = checkExprTypeHelperNear e
+checkExprType e@(EApp (PIdent (p, _)) _) = checkExprTypeHelperAt p e
+checkExprType e@(ENeg _) = checkExprTypeHelperNear e
+checkExprType e@(ENot _) = checkExprTypeHelperNear e
+checkExprType e@(EIncr _) = checkExprTypeHelperNear e
+checkExprType e@(EDecr _) = checkExprTypeHelperNear e
+checkExprType e@(ENewVar (PIdent (p, _))) = checkExprTypeHelperAt p e
+checkExprType e@(ENewArr (PIdent (p, _)) _) = checkExprTypeHelperAt p e
+checkExprType e@(ECastVar (PIdent (p, _)) _) = checkExprTypeHelperAt p e
+checkExprType e@(ECastArr (PIdent (p, _)) _) = checkExprTypeHelperAt p e
+checkExprType e@(EMul _ _ _) = checkExprTypeHelperNear e
+checkExprType e@(EAdd _ _ _) = checkExprTypeHelperNear e
+checkExprType e@(ERel _ _ _) = checkExprTypeHelperNear e
+checkExprType e@(EAnd _ _) = checkExprTypeHelperNear e
+checkExprType e@(EOr _ _) = checkExprTypeHelperNear e
 
 -- get expression type
 
