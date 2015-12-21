@@ -26,15 +26,19 @@ type Position = (Int, Int)
 
 data Error = ErrorAt Position String
            | ErrorNear Position String
+           | UnlocalizedError String
            deriving Eq
 
 instance Ord Error where
-     ErrorAt p1 _ <= ErrorAt p2 _ = p1 <= p2
-     ErrorNear p1 _ <= ErrorNear p2 _ = p1 <= p2
-     ErrorAt p1 _ <= ErrorNear p2 _ = p1 <= p2
-     ErrorNear p1 _ <= ErrorAt p2 _ = p1 < p2
+    UnlocalizedError _ <= _ = True
+    _ <= UnlocalizedError _ = False
+    ErrorAt p1 _ <= ErrorAt p2 _ = p1 <= p2
+    ErrorNear p1 _ <= ErrorNear p2 _ = p1 <= p2
+    ErrorAt p1 _ <= ErrorNear p2 _ = p1 <= p2
+    ErrorNear p1 _ <= ErrorAt p2 _ = p1 < p2
 
 instance Show Error where
+    show (UnlocalizedError m) = m
     show (ErrorAt (l, c) m) = "At line: " ++ show l ++ ", position: " ++ show c ++ "\n\t" ++ m
     show (ErrorNear (l, c) m) = "Near line: " ++ show l ++ ", position: " ++ show c ++ "\n\t" ++ m
 
@@ -65,6 +69,12 @@ check b s = unless b (throw s)
 
 checkM :: CM Bool -> String -> CM ()
 checkM b s = unlessM b (throw s)
+
+checkUnlocalized :: Bool -> String -> CM ()
+checkUnlocalized b s = unless b (throwError [UnlocalizedError s])
+
+checkUnlocalizedM :: CM Bool -> String -> CM ()
+checkUnlocalizedM b s = unlessM b (throwError [UnlocalizedError s])
 
 interferenceError :: (Type, HandSide) -> (Type, HandSide) -> String
 interferenceError (et, ehs) (it, ihs) = "Couldn't match expected " ++ show ehs ++ " " ++ show et ++ " against interfered " ++ show ihs ++ " " ++ show it ++ "."
@@ -443,7 +453,9 @@ getType (EVar (PIdent (p, i))) = do
     checkAtM p (isLocal i) (i ++ " is not defined.")
     t <- fieldType <$> getLocal i
     return (t, LHS)
-getType ELitInt {} = return (TInt, RHS)
+getType (ELitInt i) = do
+    check (toInteger (minBound :: Int) <= i && i <= toInteger (maxBound :: Int)) (show i ++ " exceeds int bounds.")
+    return (TInt, RHS)
 getType EString {} = return (TString, RHS)
 getType ELitTrue = return (TBool, RHS)
 getType ELitFalse = return (TBool, RHS)
@@ -573,6 +585,10 @@ checkStmt _ (Ass e1 e2) = do
         (do ex <- error ("Cannot assign to " ++ show RHS ++ ".")
             exs <- errors $ getType e2
             throwError $ ex : exs)
+checkStmt TVoid (Ret e) = do
+    exs <- errors $ checkType e TVoid RHS
+    ex <- error $ notCreateableError TVoid
+    throwError $ ex : exs
 checkStmt rt (Ret e) = checkType e rt RHS
 checkStmt TVoid VRet = return ()
 checkStmt rt VRet = throw (interferenceError (rt, RHS) (TVoid, RHS))
@@ -606,7 +622,8 @@ getDefsInTopDef :: TopDef -> CM ()
 getDefsInTopDef (FnDef brt (PIdent (p, i)) args b) = do
     exs1 <- errors $ checkAtM p (notM $ isFunction i) (existsError i)
     exs2 <- errors $ checkAt p (isUnique argns) repeatedError
-    let exs = exs1 ++ exs2
+    exs3 <- errors $ when (i == "main") (checkAt p (null args) "Main function must have no arguments.")
+    let exs = exs1 ++ exs2 ++ exs3
     unless (null exs) (throwError exs)
     setFunction i args' b (TFun argts rt) p
     where
@@ -685,7 +702,9 @@ semanticAnalysis p = do
     let exs3 = exs1 ++ exs2
     unless (null exs3) (throwError exs3)
     exs4 <- concatMapM (errors . checkFunction) . M.elems =<< getFunctions
-    unless (null exs4) (throwError exs4)
+    exs5 <- errors $ checkUnlocalizedM (isFunction "main") "No main function."
+    let exs6 = exs4 ++ exs5
+    unless (null exs6) (throwError exs6)
 
 -- run
 
@@ -697,7 +716,8 @@ initialState = State {
     functions = M.fromList [("printString", Function [("s", Field TString (0, 0))] (Block []) (TFun [TString] TVoid) (0, 0)),
                             ("printInt",    Function [("i", Field TInt (0, 0))]    (Block []) (TFun [TInt] TVoid)    (0, 0)),
                             ("readInt",     Function []                            (Block []) (TFun [] TInt)         (0, 0)),
-                            ("readString",  Function []                            (Block []) (TFun [] TString)      (0, 0))],
+                            ("readString",  Function []                            (Block []) (TFun [] TString)      (0, 0)),
+                            ("error",       Function []                            (Block []) (TFun [] TVoid)        (0, 0))],
     classes = M.empty
 }
 
