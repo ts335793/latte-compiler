@@ -27,8 +27,8 @@
       <file leaf-file-name="SemanticAnalysis.hs" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/src/SemanticAnalysis.hs">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.7285068">
-              <caret line="528" column="25" selection-start-line="528" selection-start-column="25" selection-end-line="528" selection-end-column="25" />
+            <state vertical-scroll-proportion="-0.84615386">
+              <caret line="549" column="10" selection-start-line="549" selection-start-column="10" selection-end-line="549" selection-end-column="10" />
               <folding />
             </state>
           </provider>
@@ -984,8 +984,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/src/SemanticAnalysis.hs">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.7285068">
-          <caret line="528" column="25" selection-start-line="528" selection-start-column="25" selection-end-line="528" selection-end-column="25" />
+        <state vertical-scroll-proportion="-0.84615386">
+          <caret line="549" column="10" selection-start-line="549" selection-start-column="10" selection-end-line="549" selection-end-column="10" />
           <folding />
         </state>
       </provider>
