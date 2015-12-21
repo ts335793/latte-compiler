@@ -1,7 +1,28 @@
 #!/bin/bash
 
 # all good basic
-for f in $(find good/ mrjp-tests/good/arrays mrjp-tests/good/basic mrjp-tests/good/arrays mrjp-tests/good/hardcore -name '*.lat')
+for f in $(find good/ -name '*.lat')
+do
+	echo $f
+	./latc_llvm $f
+done
+
+# all good basic
+for f in $(find extensions/ -name '*.lat')
+do
+	echo $f
+	./latc_llvm $f
+done
+
+# all good basic
+for f in $(find mrjp-tests/good -name '*.lat')
+do
+	echo $f
+	./latc_llvm $f
+done
+
+# all good basic
+for f in $(find mrjp-tests/gr5 -name '*.lat')
 do
 	echo $f
 	./latc_llvm $f
