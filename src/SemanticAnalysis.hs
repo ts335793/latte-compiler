@@ -15,6 +15,7 @@ import           Data.Map             (Map)
 import qualified Data.Map             as M
 import           Data.Set             (Set)
 import qualified Data.Set             as S
+import Util
 
 -- position
 
@@ -48,6 +49,7 @@ data Type = TInt
           | TObj String
           | TArr Type
           | TFun [Type] Type
+          deriving Eq
 
 instance Show Type where
     show TInt = "int"
@@ -285,42 +287,35 @@ checkNearM b s = unlessM b (near s)
 
 -- check expression type
 
-collectCheckExprTypeErrors :: [(Expr, Type)] -> CM [Error]
-collectCheckExprTypeErrors [] = return []
-collectCheckExprTypeErrors ((e, t):xs) = do
-    es1 <- collectCheckExprTypeErrors xs
-    es2 <- (do checkExprType e t; return []) `catchError` return
-    return $ es2 ++ es1
+checkExprTypeErrors :: Expr -> Type -> HandSide -> CM [Error]
+checkExprTypeErrors e hs t = (checkExprType e hs t >> return []) `catchError` return
 
-raiseCheckExprTypeErrorsOrReturn :: [(Expr, Type)] -> a -> CM a
-raiseCheckExprTypeErrorsOrReturn xs r = do
-    exs <- collectCheckExprTypeErrors xs
-    case exs of
-        [] -> return r
-        _ -> throwError exs
-
-checkExprType :: Expr -> Type -> CM ()
-checkExprType ELitTrue t = return ()
+checkExprType :: Expr -> Type -> HandSide -> CM ()
+checkExprType ELitTrue t hs = return () -- TODO wrong
 
 -- get expression type
+
+getExprTypeErrors :: Expr -> CM [Error]
+getExprTypeErrors x = (getExprType x >> return []) `catchError` return
 
 checkFunctionCallAt :: Position -> String -> [Type] -> [Expr] -> CM ()
 checkFunctionCallAt p i argts es = do
     updateLastPosition p
     if' (length argts == length es)
-        (do exs <- collectCheckExprTypeErrors $ zip es argts
+        (do exs <- concatMapM (uncurry3 checkExprTypeErrors) (zip3 es argts (repeat RHS))
             case exs of
                 [] -> return ()
                 _ -> throwError exs)
         (do let ex = ErrorAt p ("Wrong number of parameters in " ++ i ++ " call.")
-            exs <- collectGetExprTypeErrors es
+            exs <- concatMapM getExprTypeErrors es
             throwError $ ex : exs)
 
 getNewTypeAt :: Position -> String -> CM (Type, HandSide)
 getNewTypeAt p i = do
     updateLastPosition p
     let t = read i
-    checkAtM p (isProperType t &&^ pure (isCreateable t)) (show t ++ " is not proper type.")
+    checkAtM p (isProperType t) (show t ++ " is not proper type.")
+    checkAt p (isCreateable t) (show t ++ " cannot be created.")
     return (t, LHS)
 
 getCastTypeAt :: Position -> Type -> Expr -> CM (Type, HandSide)
@@ -328,28 +323,25 @@ getCastTypeAt p nt e = do
     updateLastPosition p
     ifM (isProperType nt)
         (do (t, hs) <- getExprType e
-            checkAtM p (notM $ isSubtype nt t ||^ isSubtype t nt) ("Cannot cast " ++ show t ++ " to " ++ show nt ++ ".")
+            checkAtM p (isSubtype nt t ||^ isSubtype t nt) ("Cannot cast " ++ show t ++ " to " ++ show nt ++ ".")
             return (nt, hs))
         (do let ex = ErrorAt p (show nt ++ " is not a proper type.")
-            exs <- collectGetExprTypeErrors [e]
+            exs <- getExprTypeErrors e
             throwError $ ex : exs)
 
-checkEqualTypeExpr :: Expr -> Expr -> CM Bool
-checkEqualTypeExpr e1 e2 = do
-    exs <- collectGetExprTypeErrors [e1, e2]
-    case exs of
-        [] -> do
-            (t1, _) <- getExprType e1
-            (t2, _) <- getExprType e2
-            return $ t1 == t2
-        _ -> throwError exs
+checkEqualTypeExprs :: Expr -> Expr -> CM Bool
+checkEqualTypeExprs e1 e2 = do
+    exs <- concatMapM getExprTypeErrors [e1, e2]
+    unless (null exs) (throwError exs)
+    (t1, _) <- getExprType e1
+    (t2, _) <- getExprType e2
+    return $ t1 == t2
 
-collectGetExprTypeErrors :: [Expr] -> CM [Error]
-collectGetExprTypeErrors [] = return []
-collectGetExprTypeErrors (x:xs) = do
-    exs1 <- collectGetExprTypeErrors xs
-    exs2 <- (getExprType x >> return []) `catchError` return
-    return $ exs2 ++ exs1
+getExprTypeHelper :: [(Expr, Type, HandSide)] -> (Type, HandSide) -> CM (Type, HandSide)
+getExprTypeHelper xs r = do
+    exs <- concatMapM (uncurry3 checkExprTypeErrors) xs
+    unless (null exs) (throwError exs)
+    return r
 
 getExprType :: Expr -> CM (Type, HandSide)
 getExprType (EVar (PIdent (p, i))) = do
@@ -371,7 +363,7 @@ getExprType (ESelect e (PIdent (p, i))) = do
 getExprType (EMetCall e (PIdent (p, i)) es) = do
     (t, _) <- getExprType e `catchError` (\exs1 -> do
         updateLastPosition p
-        exs2 <- collectGetExprTypeErrors es
+        exs2 <- concatMapM getExprTypeErrors es
         throwError $ exs2 ++ exs1)
     updateLastPosition p
     ifM (hasVirtualT t i)
@@ -379,17 +371,17 @@ getExprType (EMetCall e (PIdent (p, i)) es) = do
             checkFunctionCallAt p i argts es
             return (rt, RHS))
         (do let ex = ErrorAt p (show t ++ " has no method " ++ i ++ ".")
-            exs <- collectGetExprTypeErrors es
+            exs <- concatMapM getExprTypeErrors es
             throwError $ ex : exs)
 getExprType (EAt e1 e2) = do
     (t, _) <- getExprType e1 `catchError` (\exs1 -> do
-        exs2 <- collectCheckExprTypeErrors [(e2, TInt)]
+        exs2 <- checkExprTypeErrors e2 TInt RHS
         throwError $ exs2 ++ exs1)
     if' (isArray t)
-        (do checkExprType e2 TInt
+        (do checkExprType e2 TInt RHS
             return (arrayFieldType t, LHS))
         (do ex <- errorNear (show t ++ " is not array type.")
-            exs <- collectCheckExprTypeErrors [(e2, TInt)]
+            exs <- checkExprTypeErrors e2 TInt RHS
             throwError $ ex : exs)
 getExprType (EApp (PIdent (p, i)) es) = do
     updateLastPosition p
@@ -402,34 +394,38 @@ getExprType (EApp (PIdent (p, i)) es) = do
                 checkFunctionCallAt p i argts es
                 return (rt, RHS))
             (do let ex = ErrorAt p (i ++ " function is not defined.")
-                exs <- collectGetExprTypeErrors es
+                exs <- concatMapM getExprTypeErrors es
                 throwError $ ex : exs))
-getExprType (ENeg e) = checkExprType e TInt >> return (TInt, RHS)
-getExprType (ENot e) = checkExprType e TBool >> return (TBool, RHS)
-getExprType (EIncr e) = checkExprType e TInt >> return (TInt, RHS) -- TODO check lhs
-getExprType (EDecr e) = checkExprType e TInt >> return (TInt, RHS) -- TODO check rhs
+getExprType (ENeg e) = checkExprType e TInt RHS >> return (TInt, RHS)
+getExprType (ENot e) = checkExprType e TBool RHS >> return (TBool, RHS)
+getExprType (EIncr e) = checkExprType e TInt LHS >> return (TInt, RHS)
+getExprType (EDecr e) = checkExprType e TInt LHS >> return (TInt, RHS)
 getExprType (ENewVar (PIdent (p, i))) = getNewTypeAt p i
 getExprType (ENewArr (PIdent (p, i)) e) = do
     (t, hs) <- getNewTypeAt p (i ++ "[]") `catchError` (\exs1 -> do
-        exs2 <- collectCheckExprTypeErrors [(e, TInt)]
+        exs2 <- checkExprTypeErrors e TInt RHS
         throwError $ exs2 ++ exs1)
-    checkExprType e TInt
+    checkExprType e TInt RHS
     return (t, hs)
 getExprType (ECastVar (PIdent (p, i)) e) = getCastTypeAt p (read i) e
 getExprType (ECastArr (PIdent (p, i)) e) = getCastTypeAt p (read $ i ++ "[]") e
-getExprType (EMul e1 _ e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TInt), (e2, TInt)] (TInt, RHS)
+getExprType (EMul e1 _ e2) = getExprTypeHelper [(e1, TInt, RHS), (e2, TInt, RHS)] (TInt, RHS)
 getExprType (EAdd e1 Plus e2) = do
-    exsI <- collectCheckExprTypeErrors [(e1, TInt), (e2, TInt)]
-    exsS <- collectCheckExprTypeErrors [(e1, TString), (e2, TString)]
+    exsI <- concatMapM (uncurry3 checkExprTypeErrors) [(e1, TInt, RHS), (e2, TInt, RHS)]
+    exsS <- concatMapM (uncurry3 checkExprTypeErrors) [(e1, TString, RHS), (e2, TString, RHS)]
     case (exsI, exsS) of
         ([], _) -> return (TInt, RHS)
         (_, []) -> return (TString, RHS)
         _ -> throwError exsI
-getExprType (ERel e1 EQU e2) = whenM (checkEqualTypeExpr e1 e2)
-getExprType (ERel e1 NE e2) = checkEqualTypeExpr e1 e2
-getExprType (ERel e1 _ e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TInt), (e2, TInt)] (TInt, RHS)
-getExprType (EAnd e1 e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TBool), (e2, TBool)] (TBool, RHS)
-getExprType (EOr e1 e2) = raiseCheckExprTypeErrorsOrReturn [(e1, TBool), (e2, TBool)] (TBool, RHS)
+getExprType (ERel e1 EQU e2) = do
+    checkNearM (checkEqualTypeExprs e1 e2) "== operator applied to different types."
+    return (TBool, RHS)
+getExprType (ERel e1 NE e2) = do
+    checkNearM (checkEqualTypeExprs e1 e2) "!= operator applied to different types."
+    return (TBool, RHS)
+getExprType (ERel e1 _ e2) = getExprTypeHelper [(e1, TInt, RHS), (e2, TInt, RHS)] (TBool, RHS)
+getExprType (EAnd e1 e2) = getExprTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool, RHS)
+getExprType (EOr e1 e2) = getExprTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool, RHS)
 
 {-import           BNFC.AbsLatte       hiding (Type)
 import qualified BNFC.AbsLatte       as Abs
