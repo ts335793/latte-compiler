@@ -7,9 +7,16 @@ do
 	./latc_llvm $f
 done
 
-# all good structs
-for f in $(find extensions/objects1 extensions/objects2 extensions/struct mrjp-tests/good/virtual mrjp-tests/gr5 -name '*.lat')
+# all bad basic
+for f in $(find bad/ -name '*.lat')
 do
 	echo $f
 	./latc_llvm $f
 done
+
+# all good structs
+#for f in $(find extensions/objects1 extensions/objects2 extensions/struct mrjp-tests/good/virtual mrjp-tests/gr5 -name '*.lat')
+#do
+#	echo $f
+#	./latc_llvm $f
+#done

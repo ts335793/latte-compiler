@@ -22,5 +22,8 @@ main = do
   src <-readFile srcPath
   case parse src of
     Left e -> die e
-    Right ast ->
+    Right ast -> do
       writeFile astPath (show ast)
+      case runSemanticAnalysis ast of
+        Left xs -> putStrLn $ unlines $ map show xs
+        Right () -> putStrLn "OK"

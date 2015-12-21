@@ -17,7 +17,7 @@ import           Data.Set             (Set)
 import qualified Data.Set             as S
 import           Prelude              hiding (error)
 import           Util
-
+import Data.List
 -- position
 
 type Position = (Int, Int)
@@ -65,6 +65,24 @@ check b s = unless b (throw s)
 
 checkM :: CM Bool -> String -> CM ()
 checkM b s = unlessM b (throw s)
+
+interferenceError :: (Type, HandSide) -> (Type, HandSide) -> String
+interferenceError (et, ehs) (it, ihs) = "Couldn't match expected " ++ show ehs ++ " " ++ show et ++ " against interfered " ++ show ihs ++ " " ++ show it ++ "."
+
+invalidTypeError :: Type -> String
+invalidTypeError t = show t ++ " is not proper type."
+
+notCreateableError :: Type -> String
+notCreateableError t = show t ++ " is not createable."
+
+repeatedError :: String
+repeatedError = "Repeated argument names."
+
+existsError :: String -> String
+existsError s = s ++ " already defined."
+
+existsInClassError :: String -> String -> String
+existsInClassError c s = s ++ " already defined in " ++ c ++ "."
 
 -- type
 
@@ -117,8 +135,8 @@ isCallable (TFun _ _) = True
 isCallable _ = False
 
 isCreateable :: Type -> Bool
-isCreateable TVoid = True
-isCreateable _ = False
+isCreateable TVoid = False
+isCreateable _ = True
 
 isArray :: Type -> Bool
 isArray (TArr _) = True
@@ -172,22 +190,21 @@ data Virtual = Virtual {
 }
 
 data Class = Class {
-    superclass    :: Maybe String,
+    superclass    :: String,
     fields        :: Map String Field,
     methods       :: Map String Function,
     virtuals      :: Map String Virtual,
     classPosition :: Position
 }
 
-getSuperclass :: String -> CM (Maybe String)
+getSuperclass :: String -> CM String
 getSuperclass c = superclass <$> getClass c
 
 getSuperclasses :: String -> CM (Set String)
+getSuperclasses "object" = return $ S.singleton "object"
 getSuperclasses c = do
-    ms <- getSuperclass c
-    case ms of
-        Nothing -> return $ S.singleton c
-        Just s -> S.insert c <$> getSuperclasses s
+    s <- getSuperclass c
+    S.insert c <$> getSuperclasses s
 
 getFields :: String -> CM (Map String Field)
 getFields c = fields <$> getClass c
@@ -325,32 +342,29 @@ getClass c = (M.! c) <$> getClasses
 isClass :: String -> CM Bool
 isClass c = M.member c <$> getClasses
 
-setClass :: String -> Maybe String -> Map String Field -> Map String Function -> Map String Virtual -> Position -> CM ()
+setClass :: String -> String -> Map String Field -> Map String Function -> Map String Virtual -> Position -> CM ()
 setClass c s fs ms vs p = modify (\st -> st { classes = M.insert c (Class s fs ms vs p) (classes st) })
 
 type CM = ExceptT [Error] (St.State State)
 
 -- check expression type
 
-typeError :: (Type, HandSide) -> (Type, HandSide) -> String
-typeError (et, ehs) (it, ihs) = "Couldn't match expected " ++ show ehs ++ " " ++ show et ++ " against interfered " ++ show ihs ++ " " ++ show it ++ "."
-
 checkTypeHelperAt :: Position -> Expr -> Type -> HandSide -> CM ()
 checkTypeHelperAt p e t LHS = do
     updateLastPosition p
     (t', hs') <- getType e
-    checkAtM p (pure (hs' == LHS) &&^ isSubtype t' t) (typeError (t, LHS) (t', hs'))
+    checkAtM p (pure (hs' == LHS) &&^ isSubtype t' t) (interferenceError (t, LHS) (t', hs'))
 checkTypeHelperAt p e t RHS = do
     (t', hs') <- getType e
-    checkAtM p (isSubtype t' t) (typeError (t, RHS) (t', hs'))
+    checkAtM p (isSubtype t' t) (interferenceError (t, RHS) (t', hs'))
 
 checkTypeHelper :: Expr -> Type -> HandSide -> CM ()
 checkTypeHelper e t LHS = do
     (t', hs') <- getType e
-    checkM (pure (hs' == LHS) &&^ isSubtype t' t) (typeError (t, LHS) (t', hs'))
+    checkM (pure (hs' == LHS) &&^ isSubtype t' t) (interferenceError (t, LHS) (t', hs'))
 checkTypeHelper e t RHS = do
     (t', hs') <- getType e
-    checkM (isSubtype t' t) (typeError (t, RHS) (t', hs'))
+    checkM (isSubtype t' t) (interferenceError (t, RHS) (t', hs'))
 
 checkType :: Expr -> Type -> HandSide -> CM ()
 checkType e@(EVar (PIdent (p, _))) = checkTypeHelperAt p e
@@ -392,8 +406,8 @@ checkFunctionCallAt p i argts es = do
 getNewTypeAt :: Position -> String -> CM (Type, HandSide)
 getNewTypeAt p i = do
     updateLastPosition p
-    checkAtM p (isProperType t) (show t ++ " is not proper type.")
-    checkAt p (isCreateable t) (show t ++ " cannot be created.")
+    checkAtM p (isProperType t) (invalidTypeError t)
+    checkAt p (isCreateable t) (notCreateableError t)
     return (t, LHS)
     where
         t = read i
@@ -405,7 +419,7 @@ getCastTypeAt p nt e = do
         (do (t, hs) <- getType e
             checkAtM p (isSubtype nt t ||^ isSubtype t nt) ("Cannot cast " ++ show t ++ " to " ++ show nt ++ ".")
             return (nt, hs))
-        (do let ex = ErrorAt p (show nt ++ " is not a proper type.")
+        (do let ex = ErrorAt p (invalidTypeError nt)
             exs <- errors $ getType e
             throwError $ ex : exs)
 
@@ -497,6 +511,7 @@ getType (EAdd e1 Plus e2) = do
         ([], _) -> return (TInt, RHS)
         (_, []) -> return (TString, RHS)
         _ -> throwError exsI
+getType (EAdd e1 _ e2) = getTypeHelper [(e1, TInt, RHS), (e2, TInt, RHS)] (TInt, RHS)
 getType (ERel e1 EQU e2) = do
     checkM (checkEqualType e1 e2) "== operator applied to different types."
     return (TBool, RHS)
@@ -509,6 +524,12 @@ getType (EOr e1 e2) = getTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool,
 
 -- check statements
 
+checkFunction :: Function -> CM ()
+checkFunction (Function args b (TFun argts rt) p) = do
+    updateLastPosition p
+    frame (do forM_ args (\(i, Field t p) -> setLocal i t p)
+              checkBlock rt b)
+
 checkBlock :: Type -> Block -> CM ()
 checkBlock rt (Block xs) = do
     exs <- frame $ concatMapM (errors . checkStmt rt) xs
@@ -516,7 +537,7 @@ checkBlock rt (Block xs) = do
 
 checkItem :: Type -> Item -> CM ()
 checkItem t (NoInit (PIdent (p, i))) = do
-    checkAtM p (isBlock i) (i ++ " already defined in scope.")
+    checkAtM p (notM $ isBlock i) (i ++ " already defined in scope.")
     setLocal i t p
 checkItem t (Init (PIdent (p, i)) e) = do
     whenM (isBlock i)
@@ -537,8 +558,8 @@ checkStmt :: Type -> Stmt -> CM ()
 checkStmt _ Empty = return ()
 checkStmt rt (BStmt b) = checkBlock rt b
 checkStmt _ (Decl bt is) = do -- TODO add more checks on failure
-    checkM (isProperType t) (show t ++ " is not a proper type.")
-    check (isCreateable t) (show t ++ " is not createable.")
+    checkM (isProperType t) (invalidTypeError t)
+    check (isCreateable t) (notCreateableError t)
     exs <- concatMapM (errors . checkItem t) is
     unless (null exs) (throwError exs)
     where
@@ -554,7 +575,7 @@ checkStmt _ (Ass e1 e2) = do
             throwError $ ex : exs)
 checkStmt rt (Ret e) = checkType e rt RHS
 checkStmt TVoid VRet = return ()
-checkStmt rt VRet = throw (typeError (rt, RHS) (TVoid, RHS))
+checkStmt rt VRet = throw (interferenceError (rt, RHS) (TVoid, RHS))
 checkStmt rt (Cond e s) = checkStmtHelper [(e, TBool, RHS)] [(rt, s)]
 checkStmt rt (CondElse e s1 s2) = checkStmtHelper [(e, TBool, RHS)] [(rt, s1), (rt, s2)]
 checkStmt rt (While e s) = checkStmtHelper [(e, TBool, RHS)] [(rt, s)]
@@ -573,6 +594,9 @@ checkStmt _ (SExp e) = void $ getType e
 
 -- collect definitions
 
+isUnique :: (Eq a) => [a] -> Bool
+isUnique l = length (nub l) == length l
+
 getDefsInProgram :: Program -> CM ()
 getDefsInProgram (Program xs) = do
     exs <- concatMapM (errors . getDefsInTopDef) xs
@@ -580,21 +604,25 @@ getDefsInProgram (Program xs) = do
 
 getDefsInTopDef :: TopDef -> CM ()
 getDefsInTopDef (FnDef brt (PIdent (p, i)) args b) = do
-    checkAtM p (notM $ isFunction i) ("Function " ++ i ++ " already exists.")
+    exs1 <- errors $ checkAtM p (notM $ isFunction i) (existsError i)
+    exs2 <- errors $ checkAt p (isUnique argns) repeatedError
+    let exs = exs1 ++ exs2
+    unless (null exs) (throwError exs)
     setFunction i args' b (TFun argts rt) p
     where
         rt = bnfcTypeToType brt
         args' = map (\(Arg t (PIdent (p, a))) -> (a, Field (bnfcTypeToType t) p)) args
         argts = map (\(_, f) -> fieldType f) args'
+        argns = map fst args'
 getDefsInTopDef (TopClsDef (PIdent (p, c)) xs) = do
-    checkAtM p (notM $ isClass c) ("Class " ++ c ++ " already exists.")
-    setClass c Nothing M.empty M.empty M.empty p
+    checkAtM p (notM $ isClass c) (existsError c)
+    setClass c "object" M.empty M.empty M.empty p
     exs <- concatMapM (errors . getDefsInClsDef c) xs
     unless (null exs) (throwError exs)
 
 getDefsInTopDef (ExtClsDef (PIdent (p, c)) (PIdent (_, s)) xs) = do
-    checkAtM p (notM $ isClass c) ("Class " ++ c ++ " already exists.")
-    setClass c (Just s) M.empty M.empty M.empty p
+    checkAtM p (notM $ isClass c) (existsError c)
+    setClass c s M.empty M.empty M.empty p
     exs <- concatMapM (errors . getDefsInClsDef c) xs
     unless (null exs) (throwError exs)
 
@@ -605,23 +633,77 @@ getDefsInClsDef c (VarDef bt props) = do
     where
         t = bnfcTypeToType bt
         collectField (PIdent (p, i)) = do
-            checkAtM p (notM $ hasField c i) ("Property " ++ i ++ " already exists in class " ++ c ++ ".")
+            checkAtM p (notM $ hasField c i) (existsInClassError c i)
             setField c i t p
 getDefsInClsDef c (MetDef brt (PIdent (p, i)) args b) = do
-    checkAtM p (notM $ hasMethod c i) ("Method " ++ i ++ " already exists in class " ++ c ++ ".")
+    exs1 <- errors $ checkAtM p (notM $ hasMethod c i) (existsInClassError c i)
+    exs2 <- errors $ checkAt p (isUnique argns) repeatedError
+    let exs = exs1 ++ exs2
+    unless (null exs) (throwError exs)
     setMethod c i args' b (TFun argts rt) p
     where
         rt = bnfcTypeToType brt
         args' = map (\(Arg t (PIdent (p, i))) -> (i, Field (bnfcTypeToType t) p)) args
         argts = map (\(_, f) -> fieldType f) args'
+        argns = map fst args'
 
 -- check definitions consistency
+
+checkTypesInFunction :: Function -> CM ()
+checkTypesInFunction (Function _ _ (TFun argts rt) p) = do
+    exs1 <- concatMapM (errors . (\t -> checkAtM p (isProperType t) (invalidTypeError t))) (rt : argts)
+    exs2 <- concatMapM (errors . (\t -> checkAt p (isCreateable t) (notCreateableError t))) argts
+    let exs = exs1 ++ exs2
+    unless (null exs) (throwError exs)
+
+checkTypesInClass :: Class -> CM ()
+checkTypesInClass (Class s fs ms _ p) = do
+    exs1 <- errors $ checkAtM p (isClass s) (existsError s)
+    exs2 <- concatMapM (errors . (\(Field t p) -> checkAtM p (isProperType t) (invalidTypeError t))) (M.elems fs)
+    exs3 <- concatMapM (errors . (\(Field t p) -> checkAt p (isCreateable t) (notCreateableError t))) (M.elems fs)
+    exs4 <- concatMapM (errors . checkTypesInFunction) (M.elems ms)
+    let exs = exs1 ++ exs2 ++ exs3 ++ exs4
+    unless (null exs) (throwError exs)
+
+checkTypes :: CM ()
+checkTypes = do
+    exs1 <- concatMapM (errors . checkTypesInFunction) . M.elems =<< getFunctions
+    exs2 <- concatMapM (errors . checkTypesInClass) . M.elems =<< getClasses
+    let exs = exs1 ++ exs2
+    unless (null exs) (throwError exs)
 
 -- check inheritance cycles
 
 -- create virtuals
 
--- run semantic analysis
+-- semantic analysis
+
+semanticAnalysis :: Program -> CM ()
+semanticAnalysis p = do
+    exs1 <- errors $ getDefsInProgram p
+    exs2 <- errors checkTypes
+    let exs3 = exs1 ++ exs2
+    unless (null exs3) (throwError exs3)
+    exs4 <- concatMapM (errors . checkFunction) . M.elems =<< getFunctions
+    unless (null exs4) (throwError exs4)
+
+-- run
+
+initialState :: State
+initialState = State {
+    lastPosition = (0, 0),
+    currentClass = Nothing,
+    frames = [],
+    functions = M.fromList [("printString", Function [("s", Field TString (0, 0))] (Block []) (TFun [TString] TVoid) (0, 0)),
+                            ("printInt",    Function [("i", Field TInt (0, 0))]    (Block []) (TFun [TInt] TVoid)    (0, 0)),
+                            ("readInt",     Function []                            (Block []) (TFun [] TInt)         (0, 0)),
+                            ("readString",  Function []                            (Block []) (TFun [] TString)      (0, 0))],
+    classes = M.empty
+}
+
+runSemanticAnalysis :: Program -> Either [Error] ()
+runSemanticAnalysis p = evalState (runExceptT (semanticAnalysis p)) initialState
+
 
 {-import           BNFC.AbsLatte       hiding (Type)
 import qualified BNFC.AbsLatte       as Abs
