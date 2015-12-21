@@ -15,7 +15,7 @@ import           Data.Map             (Map)
 import qualified Data.Map             as M
 import           Data.Set             (Set)
 import qualified Data.Set             as S
-import Util
+import           Util
 
 -- position
 
@@ -152,6 +152,9 @@ getCurrentClass = currentClass <$> get
 getFrames :: CM [Map String Field]
 getFrames = frames <$> get
 
+getBlock :: CM (Map String Field)
+getBlock = head <$> getFrames
+
 getLocal :: String -> CM Field
 getLocal l = do
     Just m <- find (M.member l) <$> getFrames
@@ -243,6 +246,9 @@ inClass = (Nothing /=) <$> getCurrentClass
 isLocal :: String -> CM Bool
 isLocal l = any (M.member l) <$> getFrames
 
+isBlock :: String -> CM Bool
+isBlock l = M.member l <$> getBlock
+
 isFunction :: String -> CM Bool
 isFunction f = M.member f <$> getFunctions
 
@@ -275,6 +281,22 @@ near :: String -> CM ()
 near s = do
     ex <- errorNear s
     throwError [ex]
+
+pushFrame :: CM ()
+pushFrame = modify (\st -> st { frames = M.empty : frames st })
+
+popFrame :: CM ()
+popFrame = modify (\st -> st { frames = tail $ frames st })
+
+frame :: CM a -> CM a
+frame b = do
+    pushFrame
+    r <- b
+    popFrame
+    return r
+
+setLocal :: String -> Type -> Position -> CM ()
+setLocal l t p = modify (\st -> st { frames = M.insert l (Field t p) (head $ frames st) : tail (frames st) })
 
 -- checkers
 
@@ -360,10 +382,11 @@ checkFunctionCallAt p i argts es = do
 getNewTypeAt :: Position -> String -> CM (Type, HandSide)
 getNewTypeAt p i = do
     updateLastPosition p
-    let t = read i
     checkAtM p (isProperType t) (show t ++ " is not proper type.")
     checkAt p (isCreateable t) (show t ++ " cannot be created.")
     return (t, LHS)
+    where
+        t = read i
 
 getCastTypeAt :: Position -> Type -> Expr -> CM (Type, HandSide)
 getCastTypeAt p nt e = do
@@ -473,6 +496,77 @@ getExprType (ERel e1 NE e2) = do
 getExprType (ERel e1 _ e2) = getExprTypeHelper [(e1, TInt, RHS), (e2, TInt, RHS)] (TBool, RHS)
 getExprType (EAnd e1 e2) = getExprTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool, RHS)
 getExprType (EOr e1 e2) = getExprTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool, RHS)
+
+-- check stmt types
+
+checkStmtTypesErrors :: Type -> Stmt -> CM [Error]
+checkStmtTypesErrors t s = (checkStmtTypesErrors t s >> return []) `catchError` return
+
+checkBlockTypes :: Type -> Block -> CM ()
+checkBlockTypes rt (Block xs) = do
+    exs <- frame $ concatMapM (checkStmtTypesErrors rt) xs
+    unless (null exs) (throwError exs)
+
+checkItemTypesErrors :: Type -> Item -> CM [Error]
+checkItemTypesErrors t i = (checkItemTypesErrors t i >> return []) `catchError` return
+
+checkItemTypes :: Type -> Item -> CM ()
+checkItemTypes t (NoInit (PIdent (p, i))) = do
+    checkAtM p (isBlock i) (i ++ " already defined in scope.")
+    setLocal i t p
+checkItemTypes t (Init (PIdent (p, i)) e) = do
+    whenM (isBlock i)
+        (do let ex = ErrorAt p (i ++ " already defined in scope.")
+            exs <- checkExprTypeErrors e t RHS
+            throwError $ ex : exs)
+    checkExprType e t RHS
+    setLocal i t p
+
+checkStmtTypesHelper :: [(Expr, Type, HandSide)] -> [(Type, Stmt)] -> CM ()
+checkStmtTypesHelper es ss = do
+    exsE <- concatMapM (uncurry3 checkExprTypeErrors) es
+    exsS <- concatMapM (frame . uncurry checkStmtTypesErrors) ss
+    let exs = exsE ++ exsS
+    unless (null exs) (throwError exs)
+
+checkStmtTypes :: Type -> Stmt -> CM ()
+checkStmtTypes _ Empty = return ()
+checkStmtTypes rt (BStmt b) = checkBlockTypes rt b
+checkStmtTypes _ (Decl bt is) = do -- TODO add some more checks on failure
+    checkNearM (isProperType t) (show t ++ " is not a proper type.")
+    checkNear (isCreateable t) (show t ++ " is not createable.")
+    exs <- concatMapM (checkItemTypesErrors t) is
+    unless (null exs) (throwError exs)
+    where
+        t = bnfcTypeToType bt
+checkStmtTypes _ (Ass e1 e2) = do
+    (t1, hs1) <- getExprType e1 `catchError` (\exs1 -> do
+        exs2 <- getExprTypeErrors e2
+        throwError $ exs2 ++ exs1)
+    if' (hs1 == LHS)
+        (checkExprType e2 t1 RHS)
+        (do ex <- errorNear ("Cannot assign to " ++ show RHS ++ ".")
+            exs <- getExprTypeErrors e2
+            throwError $ ex : exs)
+checkStmtTypes rt (Ret e) = checkExprType e rt RHS
+checkStmtTypes TVoid VRet = return ()
+checkStmtTypes rt VRet = near (typeError (rt, RHS) (TVoid, RHS))
+checkStmtTypes rt (Cond e s) = checkStmtTypesHelper [(e, TBool, RHS)] [(rt, s)]
+checkStmtTypes rt (CondElse e s1 s2) = checkStmtTypesHelper [(e, TBool, RHS)] [(rt, s1), (rt, s2)]
+checkStmtTypes rt (While e s) = checkStmtTypesHelper [(e, TBool, RHS)] [(rt, s)]
+checkStmtTypes rt (For bt (PIdent (p, i)) e s) =
+    frame (ifM (isProperType t)
+              (do checkExprType e (TArr t) RHS `catchError` (\exs1 -> do
+                      exs2 <- frame $ checkStmtTypesErrors rt s
+                      throwError $ exs2 ++ exs1)
+                  frame $ setLocal i t p >> checkStmtTypes rt s)
+              (do exsE <- getExprTypeErrors e
+                  exsS <- frame $ checkStmtTypesErrors rt s
+                  throwError $ exsE ++ exsS))
+    where
+        t = bnfcTypeToType bt
+checkStmtTypes _ (SExp e) = void $ getExprType e
+
 
 {-import           BNFC.AbsLatte       hiding (Type)
 import qualified BNFC.AbsLatte       as Abs
@@ -884,83 +978,6 @@ createVirtuals = do
             ns <- neighbours (Just c)
             forM_ ns dfs
 
--- check
-
-getExprType :: Expr -> IM (Type, LR)
-getExprType (EVar (PIdent (p, l))) = do
-    setLastPosition p
-    unlessM (isLocal l)
-        (do notify ("Variable " ++ l ++ " is not defined.") p
-            setLocal l unknownType p)
-    Field t _ <- getLocal l
-    return (t, L)
-getExprType (ELitInt _) = return (intType, R)
-getExprType (EString _) = return (stringType, R)
-getExprType ELitTrue = return (boolType, R)
-getExprType ELitFalse = return (boolType, R)
-getExprType ENull = return (anyType, R)
-getExprType (ESelect e (PIdent (p, f))) = do
-    setLastPosition p
-    (et, _) <- getExprType e
-    ifM (isTypeField et f)
-        (do ft <- getTypeField et f
-            return (ft, L))
-        (do notify ("Type " ++ show et ++ " has no field " ++ show f ++ ".") p
-            return (unknownType, L))
-getExprType (EMetCall e (PIdent (p, f)) es) = do
-    setLastPosition p
-    (et, _) <- getExprType e
-    ifM (isTypeVirtual et f)
-        (do Virtual t _ <- getTypeVirtual et f
-            return (t, R))
-        (do notify ("Type " ++ show et ++ " has no method " ++ show f ++ ".") p
-            return (unknownType, L))
-getExprType (EAt e1 e2) = do
-    (e1t, _) <- getExprType e1
-    (e2t, _) <- getExprType e2
-    case (e1t, e2t) of
-        (Arr c, Var "int") -> return (Var c, L)
-        (Arr c, _) -> do
-            notify' ("Cannot use " ++ show e2t ++ " as index.")
-            return (Var c, L)
-        _ -> do
-            notify' ("Cannot access index of " ++ show e1t ++ ".")
-            return (unknownType, L)
-getExprType (EApp (PIdent (p, f)) es) = do
-    setLastPosition p
-    ets <- fst <$> mapM getExprType es
-    ifM (isLocal "self" &&^ (do Field st _ <- getLocal "self"; isTypeVirtual st f))
-        (do st <- getLocal "self"
-            Virtual ft@(Fun fts frt) _ <- getTypeVirtual st f
-            checkM (isSubtype (Fun ets frs) ft) ("Wrong type parameters.") p
-                (do ))
-
-{-
-Expr
-    = EVar PIdent
-    | ELitInt Integer
-    | EString String
-    | ELitTrue
-    | ELitFalse
-    | ENull
-    | ESelect Expr PIdent
-    | EMetCall Expr PIdent [Expr]
-    | EAt Expr Expr
-    | EApp PIdent [Expr]
-    | ENeg Expr
-    | ENot Expr
-    | EIncr Expr
-    | EDecr Expr
-    | ENewVar PIdent
-    | ENewArr PIdent Expr
-    | ECastArr PIdent Expr
-    | ECastVar PIdent Expr
-    | EMul Expr MulOp Expr
-    | EAdd Expr AddOp Expr
-    | ERel Expr RelOp Expr
-    | EAnd Expr Expr
-    | EOr Expr Expr-}
-
 checkItem :: Type -> Item -> IM ()
 checkItem t (NoInit (PIdent (p, l))) = setLastPosition p >> setLocal l t p
 checkItem t (Init (PIdent (p, l)) e) = do
@@ -1027,32 +1044,6 @@ checkAll = do
         frame (do
             setLocal "self" (Var c) cp
             forM_ ms checkFunction))
-
-{-
-Expr
-    = EVar PIdent
-    | ELitInt Integer
-    | EString String
-    | ELitTrue
-    | ELitFalse
-    | ENull
-    | ESelect Expr PIdent
-    | EMetCall Expr PIdent [Expr]
-    | EAt Expr Expr
-    | EApp PIdent [Expr]
-    | ENeg Expr
-    | ENot Expr
-    | EIncr Expr
-    | EDecr Expr
-    | ENewVar PIdent
-    | ENewArr PIdent Expr
-    | ECastArr PIdent Expr
-    | ECastVar PIdent Expr
-    | EMul Expr MulOp Expr
-    | EAdd Expr AddOp Expr
-    | ERel Expr RelOp Expr
-    | EAnd Expr Expr
-    | EOr Expr Expr
 
 
 
@@ -1132,4 +1123,4 @@ checkTypesInItem t (Init (PIdent (p, l)) e) = do
     checkM (isSubtype et t) ("Cannot assign value of type " ++ show t ++ " to variable " ++ l
                              ++ " of type " ++ show t ++ ".") p
     setLocal l t p-}
--}
+
