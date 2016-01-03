@@ -27,4 +27,7 @@ main = do
             writeFile astPath (show ast)
             case runSemanticAnalysis ast of
                 Left xs -> putStrLn $ unlines $ map show (sort xs)
-                Right () -> putStrLn "OK"
+                Right () -> do
+                    putStrLn "OK"
+                    --print $ runSemanticAnalysis' ast
+
