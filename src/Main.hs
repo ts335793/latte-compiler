@@ -8,6 +8,7 @@ import           BNFC.PrintLatte
 import           BNFC.SkelLatte
 import           Data.List
 import           SemanticAnalysis
+import CodeGeneration
 import           System.Environment
 import           System.Exit
 
