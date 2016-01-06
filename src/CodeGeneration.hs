@@ -32,7 +32,6 @@ data Type = TInt
           | TFun [Type] Type
           | TRef Type
           | TAnyRef
-          deriving Eq
 
 instance Show Type where
     show TInt = "i32"
@@ -113,7 +112,7 @@ data Instruction = IBin TypeValue TypeValue BinOp TypeValue
                  | ICall TypeValue String [TypeValue]
                  | IAssign TypeValue TypeValue
                  | IReturn TypeValue
-                 | IAllocate TypeValue Type
+                 | IAllocate TypeValue
                  | IGetPointer TypeValue [TypeValue]
                  | ILabel TypeValue
                  | IFunDefBegin Type String [TypeValue]
@@ -128,13 +127,13 @@ showTypeValues ((t, v) : xs) = showTypeValues [(t, v)] ++ ", " ++ showTypeValues
 
 instance Show Instruction where
     show (IBin (ta, va) (tb, vb) op (tc, vc)) = "\t" ++ show va ++ " = " ++ show op ++ " " ++ show tb ++ " " ++ show vb ++ ", " ++  show vc
-    show (ICmp (ta, va) (tb, vb) op (tc, vc)) = "\t" ++ show va ++ " = " ++ show op ++ " " ++ show tb ++ " " ++ show vb ++ ", " ++ show vc
+    show (ICmp (ta, va) (tb, vb) op (tc, vc)) = "\t" ++ show va ++ " = icmp " ++ show op ++ " " ++ show tb ++ " " ++ show vb ++ ", " ++ show vc
     show (IBr xs) = "\tbr " ++ showTypeValues xs
     show (ICall (TVoid, v) b xs) = "\tcall " ++ show TVoid ++ " @" ++ b ++ "(" ++ showTypeValues xs ++ ")"
     show (ICall (t, v) b xs) = "\t" ++ show v ++ " = call " ++ show t ++ " @" ++ b ++ "(" ++ showTypeValues xs ++ ")"
     show (IAssign (ta, va) (tb, vb)) = "\tWRONG " ++ show ta ++ " " ++ show va ++ " = " ++ show tb ++ " " ++ show vb
     show (IReturn (t, v)) = "\tret " ++ show t ++ " " ++ show v
-    show (IAllocate (t1, v1) t2) = "\t" ++ show v1 ++ " = alloca " ++ show t2
+    show (IAllocate (TRef t, v)) = "\t" ++ show v ++ " = alloca " ++ show t
     show (IGetPointer (t, v) xs@((TRef xt, _):_)) = "\t" ++ show v ++ " = getelementptr " ++ show xt ++ ", " ++ showTypeValues xs
     show (ILabel (t, v)) = showLabel v ++ ":"
     show (IFunDefBegin t f xs) = "define " ++ show t ++ " @" ++ f ++ "(" ++ showTypeValues xs ++ ") {"
@@ -341,7 +340,30 @@ genExpr (ECastArr (PIdent (_, i)) e) = notImplemented "ECastArr"
 genExpr (EMul e1 Times e2) = genBinExpr e1 BMul e2
 genExpr (EMul e1 Div e2) = genBinExpr e1 BDiv e2
 genExpr (EMul e1 Mod e2) = genBinExpr e1 BMod e2
-genExpr (EAdd e1 Plus e2) = genBinExpr e1 BAdd e2
+genExpr (EAdd e1 Plus e2) = do --genBinExpr e1 BAdd e2
+    tv1@(t1, _) <- genExpr e1
+    tv2@(t2, _) <- genExpr e2
+    case (t1, t2) of
+        (TInt, TInt) -> do
+            r <- newRegister TInt
+            emit $ IBin r tv1 BAdd tv2
+            return r
+        (TString, TString) -> do
+            l1r <- newRegister TInt
+            l2r <- newRegister TInt
+            emit $ ICall l1r "strlen" [tv1]
+            emit $ ICall l2r "strlen" [tv2]
+            a <- newRegister TInt
+            emit $ IBin a l1r BAdd l2r
+            b <- newRegister TInt
+            emit $ IBin b a BAdd (TInt, VInt 1)
+            c <- newRegister TString
+            emit $ ICall c "malloc" [b]
+            d <- newRegister TString
+            emit $ ICall d "strcpy" [c, tv1]
+            e <- newRegister TString
+            emit $ ICall e "strcat" [d, tv2]
+            return e
 genExpr (EAdd e1 Minus e2) = genBinExpr e1 BSub e2
 genExpr e@EAnd {} = genCondWithValue e
 genExpr e@EOr {} = genCondWithValue e
@@ -456,7 +478,10 @@ builtInFunctions = M.fromList [("printString", Function [("s", TString)] (Block 
                                ("readInt",     Function []               (Block [Ret (ELitInt 0)])  (TFun [] TInt)         []),
                                ("readString",  Function []               (Block [Ret (EString "")]) (TFun [] TString)      []),
                                ("error",       Function []               (Block [VRet])             (TFun [] TVoid)        []),
-                               ("strlen",      Function [("s", TString)] (Block [Ret (ELitInt 0)])  (TFun [TString] TInt)  [])]
+                               ("strlen",      Function [("s", TString)] (Block [Ret (ELitInt 0)])  (TFun [TString] TInt)  []),
+                               ("malloc",      Function [("i", TInt)]    (Block [Empty])              (TFun [TInt] TString)  []),
+                               ("strcat",      Function [("i", TString), ("j", TString)] (Block [Empty]) (TFun [TString, TString] TString) []),
+                               ("strcpy",      Function [("i", TString), ("j", TString)] (Block [Empty]) (TFun [TString, TString] TString) [])]
 
 initialState = State {
     lastID = 0,
