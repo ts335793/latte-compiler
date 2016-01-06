@@ -20,15 +20,24 @@ parse s =
 
 main :: IO ()
 main = do
-    [srcPath, astPath] <- getArgs
+    [srcPath, astPath, llPath] <- getArgs
     src <-readFile srcPath
     case parse src of
         Left e -> die e
         Right ast -> do
             writeFile astPath (show ast)
             case runSemanticAnalysis ast of
-                Left xs -> putStrLn $ unlines $ map show (sort xs)
+                Left xs -> do
+                    putStrLn $ unlines $ map show (sort xs)
+                    die "DIED 2"
                 Right () -> do
                     putStrLn "OK"
                     --print $ runSemanticAnalysis' ast
+                    case runCodeGeneration ast of
+                        Left m -> do
+                            putStrLn m
+                            die "DIED 3"
+                        Right xs -> do
+                            putStrLn $ unlines $ map show xs
+                            writeFile llPath (unlines $ map show xs)
 

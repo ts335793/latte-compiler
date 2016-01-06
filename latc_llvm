@@ -2,17 +2,25 @@
 
 if [ -e "$1" ]
 then
-  dist/build/LatteCompiler/LatteCompiler "$1" "${1%.*}.ast"
+  dist/build/LatteCompiler/LatteCompiler "$1" "${1%.*}.ast" "${1%.*}.ll"
   if [ $? -ne 0 ]
   then
-    echo "FAIL"
+    echo "GEN FAIL"
   else
-    echo "PASS"
+    echo "GEN PASS"
   fi
   #cat "${1%.*}.ast"
-  #llvm-as -o "${1%.*}_tmp.bc" "${1%.*}.ll"
-  #llvm-link -o "${1%.*}.bc" "${1%.*}_tmp.bc" lib/runtime.bc
-  #rm "${1%.*}_tmp.bc"
+  llvm-as -o "${1%.*}_tmp.bc" "${1%.*}.ll"
+  llvm-link -o "${1%.*}.bc" "${1%.*}_tmp.bc" lib/runtime.bc
+  rm "${1%.*}_tmp.bc"
+  DIFF=$(lli "${1%.*}.bc" | diff "${1%.*}.output" -)
+  if [ "$DIFF" != "" ]
+  then
+    echo "RUN FAIL"
+    echo $DIFF
+  else
+    echo "RUN PASS"
+  fi
 else
   echo "Couldn't find file '$1'."
 fi
