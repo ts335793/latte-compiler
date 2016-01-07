@@ -326,10 +326,22 @@ genRelCond e1 op e2 lTrue lFalse = do
     emit $ ICmp tvc tv1 op tv2
     emit $ IBr [tvc, lTrue, lFalse]
 
+genExprCond :: Expr -> TypeValue -> TypeValue -> GM ()
+genExprCond e lTrue lFalse = do
+    r <- genExpr e
+    emit $ IBr [r, lTrue, lFalse]
+
 genCond :: Expr -> TypeValue -> TypeValue -> GM ()
+genCond e@EVar {} lTrue lFalse = genExprCond e lTrue lFalse
 genCond ELitTrue lTrue lFalse = emit $ IBr [lTrue]
 genCond ELitFalse lTrue lFalse = emit $ IBr [lFalse]
+genCond e@ESelect {} lTrue lFalse = genExprCond e lTrue lFalse
+genCond e@EMetCall {} lTrue lFalse = genExprCond e lTrue lFalse
+genCond e@EAt {} lTrue lFalse = genExprCond e lTrue lFalse
+genCond e@EApp {} lTrue lFalse = genExprCond e lTrue lFalse
 genCond (ENot e) lTrue lFalse = genCond e lFalse lTrue
+genCond e@ECastVar {} lTrue lFalse = genCond e lFalse lTrue
+genCond e@ECastArr {} lTrue lFalse = genCond e lFalse lTrue
 genCond (ERel e1 LTH e2) lTrue lFalse = genRelCond e1 RLt e2 lTrue lFalse
 genCond (ERel e1 LE e2) lTrue lFalse = genRelCond e1 RLe e2 lTrue lFalse
 genCond (ERel e1 GTH e2) lTrue lFalse = genRelCond e1 RGt e2 lTrue lFalse
@@ -393,7 +405,7 @@ genExpr ELitTrue = return (TBool, VBool True)
 genExpr ELitFalse = return (TBool, VBool False)
 genExpr ENull = notImplemented "ENull"
 genExpr (ESelect e (PIdent (_, i))) = notImplemented "ESelect"
-genExpr (EMetCall e (PIdent (_, m)) args) = notImplemented "ESelect"
+genExpr (EMetCall e (PIdent (_, m)) args) = notImplemented "EMetCall"
 genExpr (EAt e1 e2) = notImplemented "EAt"
 genExpr (EApp p@(PIdent (_, f)) args) = do -- no arguments cast and methods call
     TFun argts rt <- functionType <$> getFunction f
@@ -441,6 +453,7 @@ genExpr (EAdd e1 Plus e2) = do --genBinExpr e1 BAdd e2
             emit $ ICall e "_strcat" [d, tv2]
             return e
 genExpr (EAdd e1 Minus e2) = genBinExpr e1 BSub e2
+genExpr e@ERel {} = genCondWithValue e
 genExpr e@EAnd {} = genCondWithValue e
 genExpr e@EOr {} = genCondWithValue e
 
@@ -596,25 +609,37 @@ inB :: Block -> Set TypeValue -> Set TypeValue
 inB b out = foldr inI out (blockInstructions b)
 
 inG :: Graph -> Map TypeValue (Set TypeValue) -> Map TypeValue (Set TypeValue)
-inG g outs = M.fromList $ map help (M.toList $ graphBlocks g)
+inG g outs = M.unionWith S.union outs newOuts
     where
+        newOuts = M.fromList $ map help (M.toList $ graphBlocks g)
+
         help :: (TypeValue, Block) -> (TypeValue, Set TypeValue)
         help (l, b) =
             let out = foldl (\acc n -> acc `S.union` (outs M.! n)) S.empty (blockOutputs b)
             in (l, inB b out)
 
 aliveVariables :: Graph -> Map TypeValue (Set TypeValue)
-aliveVariables g = fix $ inG g
+aliveVariables g = help (M.fromList $ map (\l -> (l, S.empty)) (M.keys $ graphBlocks g))
+    where
+        help :: Map TypeValue (Set TypeValue) -> Map TypeValue (Set TypeValue)
+        help p = let p' = traceShowId (inG g p)
+                 in if' (p == p') p (help p')
 
 -- insert phi
 
 insertPhiCalls :: GM ()
 insertPhiCalls = do
     g <- getGraph
-    let av = aliveVariables g
-    for_ (M.toList av) (\(l, s) -> do
-        bi <- getBlockInstructions l
-        setBlockInstructions l ((map (\x -> IPhi x x []) (S.toList s)) ++ bi))
+    let av2 = aliveVariables g
+        --av = inG g (M.fromList $ map (\l -> (l, S.empty)) (M.keys $ graphBlocks g))
+        --av1= traceShowId (inG g av)
+        --av2= traceShowId (inG g av1)
+    sl <- graphSource <$> getGraph
+    for_ (M.toList (traceShowId av2)) (\(l, s) ->
+        unless (l == sl)
+            (do bi <- getBlockInstructions l
+                let bi' = (map (\x -> IPhi x x []) (S.toList s)) ++ bi
+                setBlockInstructions l bi'))
 
 -- reassign registers to make ssa
 
@@ -633,13 +658,28 @@ replaceAllUses (IGetPointer l xs) old new = IGetPointer (repIfEq l old new) (map
 replaceAllUses (IPhi nx ox xs) old new = IPhi (repIfEq nx old new) ox (map (\(x, y) -> (repIfEq x old new, repIfEq y old new)) xs)
 replaceAllUses x _ _ = x
 
+replaceLeftSides :: Instruction -> TypeValue -> TypeValue -> Instruction
+replaceLeftSides (IBin l r1 op r2) old new = IBin (repIfEq l old new) r1 op r2
+replaceLeftSides (ICmp l r1 op r2) old new = ICmp (repIfEq l old new) r1  op r2
+replaceLeftSides (IBr xs) old new = IBr xs
+replaceLeftSides (ICall l f xs) old new = ICall (repIfEq l old new) f xs
+replaceLeftSides (IAssign l r) old new = IAssign (repIfEq l old new) r
+replaceLeftSides (IReturn r) old new = IReturn r
+replaceLeftSides (IAllocate l) old new = IAllocate (repIfEq l old new)
+replaceLeftSides (IGetPointer l xs) old new = IGetPointer (repIfEq l old new) xs
+replaceLeftSides (IPhi nx ox xs) old new = IPhi (repIfEq nx old new) ox xs
+replaceLeftSides x _ _ = x
+
 replaceAllUsesButPhi :: Instruction -> TypeValue -> TypeValue -> Instruction -- all but right side of phi function and old value cache
 replaceAllUsesButPhi (IPhi nx ox xs) old new = IPhi (repIfEq nx old new) ox xs
 replaceAllUsesButPhi i old new = replaceAllUses i old new
 
-getLeftSides :: Instruction -> Set TypeValue
-getLeftSides (IPhi nx _ _) = S.singleton nx
-getLeftSides x = killI x
+getLeftSide :: Instruction -> Maybe TypeValue
+getLeftSide (IPhi nx _ _) = Just nx
+getLeftSide x =
+    case S.toList (killI x) of
+        [] -> Nothing
+        [x] -> Just x
 
 updatePhiParametersInBlock :: TypeValue -> TypeValue -> Map TypeValue TypeValue -> GM ()
 updatePhiParametersInBlock l n m = do
@@ -654,19 +694,41 @@ updatePhiParametersInBlock l n m = do
 reassignRegistersInBlock :: TypeValue -> GM ()
 reassignRegistersInBlock l = do
     is <- getBlockInstructions l
-    let rs = S.toList $ foldl (\acc i -> acc `S.union` getLeftSides i) S.empty is
-    m <- mapM (\r@(t, _) -> do
-        nr <- newRegister t
-        return (r, nr)) rs
-    let is' = map (\i -> foldl (\i' (r, nr) -> replaceAllUsesButPhi i' r nr) i m) is
-    setBlockInstructions l is'
+    sl <- graphSource <$> getGraph
+    bm <- if' (l == sl)
+        (map (\x -> (x, x)) . graphParameters <$> getGraph)
+        (return [])
+    (m, revis) <- foldlM (\(m, is) i -> do
+        (m', i') <- case getLeftSide i of
+                Nothing -> return (m, i)
+                Just r@(t, _) -> do
+                    nr <- newRegister t
+                    return ((r, nr) : m, replaceLeftSides i r nr)
+        let i''' = foldl (\i'' (r, nr) -> replaceAllUsesButPhi i'' r nr) i' m
+        return (m', i''' : is)) (bm, []) is
+    setBlockInstructions l (reverse revis)
     ns <- blockOutputs <$> getGraphBlock l
     for_ ns (\n -> updatePhiParametersInBlock n l (M.fromList m))
 
+{-reassignRegistersInBlock :: TypeValue -> GM ()
+reassignRegistersInBlock l = do
+    is <- getBlockInstructions l
+    let rs = S.toList $ foldl (\acc i -> acc `S.union` getLeftSide i) S.empty is
+    m' <- mapM (\r@(t, _) -> do
+        nr <- newRegister t
+        return (r, nr)) rs
+    sl <- graphSource <$> getGraph
+    ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
+    let m = if'(sl == l) (m' ++ ps) m'
+    let is' = map (\i -> foldl (\i' (r, nr) -> replaceAllUsesButPhi i' r nr) i m) is
+    setBlockInstructions l is'
+    ns <- blockOutputs <$> getGraphBlock l
+    for_ ns (\n -> updatePhiParametersInBlock n l (M.fromList m)) --bug -}
+
 -- remove assignments
 
-removeAssignments :: [Instruction] -> [Instruction]
-removeAssignments is = help is []
+removeAssignments :: [(TypeValue, TypeValue)] -> [Instruction] -> [Instruction]
+removeAssignments m is = help is m
     where
         help :: [Instruction] -> [(TypeValue, TypeValue)] -> [Instruction]
         help [] _ = []
@@ -681,11 +743,13 @@ getFunctionCode :: String -> Function -> GM [Instruction]
 getFunctionCode n f = do
     is <- genFunction n f
     createGraphFromInstructions is
+    --return is
     insertPhiCalls
-    return is
     --graphToInstructions n <$> getGraph
-    {-mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
-    removeAssignments . graphToInstructions n <$> getGraph-}
+    mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
+    ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
+    removeAssignments (traceShowId ps) . graphToInstructions n <$> getGraph
+    --graphToInstructions n <$> getGraph
 
 -- collect definitions
 
@@ -718,6 +782,7 @@ codeGeneration p = do
 codeGeneration2 :: Program -> GM [Instruction]
 codeGeneration2 p = do
     getDefsInProgram p
+    --is1 <- concatMapM (uncurry getFunctionCode) . filter (\(k,_) -> not (M.member k builtInFunctions || k == "main")) . M.toList =<< getFunctions
     is1 <- concatMapM (uncurry getFunctionCode) . filter (\(k,_) -> not (M.member k builtInFunctions)) . M.toList =<< getFunctions
     is2 <- map (\(s, tv) -> IStringConstant tv s) . M.toList <$> getStringConstants
     let is3 = map (\(s, Function _ _ (TFun argts rt) _) -> IDeclare rt s argts) (M.toList builtInFunctions)
