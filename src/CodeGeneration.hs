@@ -351,18 +351,18 @@ genExpr (EAdd e1 Plus e2) = do --genBinExpr e1 BAdd e2
         (TString, TString) -> do
             l1r <- newRegister TInt
             l2r <- newRegister TInt
-            emit $ ICall l1r "strlen" [tv1]
-            emit $ ICall l2r "strlen" [tv2]
+            emit $ ICall l1r "_strlen" [tv1]
+            emit $ ICall l2r "_strlen" [tv2]
             a <- newRegister TInt
             emit $ IBin a l1r BAdd l2r
             b <- newRegister TInt
             emit $ IBin b a BAdd (TInt, VInt 1)
             c <- newRegister TString
-            emit $ ICall c "malloc" [b]
+            emit $ ICall c "_malloc" [b]
             d <- newRegister TString
-            emit $ ICall d "strcpy" [c, tv1]
+            emit $ ICall d "_strcpy" [c, tv1]
             e <- newRegister TString
-            emit $ ICall e "strcat" [d, tv2]
+            emit $ ICall e "_strcat" [d, tv2]
             return e
 genExpr (EAdd e1 Minus e2) = genBinExpr e1 BSub e2
 genExpr e@EAnd {} = genCondWithValue e
@@ -473,15 +473,15 @@ codeGeneration p = do
     mapM_ (\(s, Function _ _ (TFun argts rt) _) -> emit $ IDeclare rt s argts) (M.toList builtInFunctions)
     getInstructions
 
-builtInFunctions = M.fromList [("printString", Function [("s", TString)] (Block [VRet])             (TFun [TString] TVoid) []),
-                               ("printInt",    Function [("i", TInt)]    (Block [VRet])             (TFun [TInt] TVoid)    []),
-                               ("readInt",     Function []               (Block [Ret (ELitInt 0)])  (TFun [] TInt)         []),
-                               ("readString",  Function []               (Block [Ret (EString "")]) (TFun [] TString)      []),
-                               ("error",       Function []               (Block [VRet])             (TFun [] TVoid)        []),
-                               ("strlen",      Function [("s", TString)] (Block [Ret (ELitInt 0)])  (TFun [TString] TInt)  []),
-                               ("malloc",      Function [("i", TInt)]    (Block [Empty])              (TFun [TInt] TString)  []),
-                               ("strcat",      Function [("i", TString), ("j", TString)] (Block [Empty]) (TFun [TString, TString] TString) []),
-                               ("strcpy",      Function [("i", TString), ("j", TString)] (Block [Empty]) (TFun [TString, TString] TString) [])]
+builtInFunctions = M.fromList [("printString", Function [("s", TString)] (Block []) (TFun [TString] TVoid) []),
+                               ("printInt",    Function [("i", TInt)]    (Block []) (TFun [TInt] TVoid)    []),
+                               ("readInt",     Function []               (Block []) (TFun [] TInt)         []),
+                               ("readString",  Function []               (Block []) (TFun [] TString)      []),
+                               ("error",       Function []               (Block []) (TFun [] TVoid)        []),
+                               ("_strlen",      Function [("s", TString)] (Block []) (TFun [TString] TInt)  []),
+                               ("_malloc",      Function [("i", TInt)]    (Block []) (TFun [TInt] TString)  []),
+                               ("_strcat",      Function [("i", TString), ("j", TString)] (Block [Empty]) (TFun [TString, TString] TString) []),
+                               ("_strcpy",      Function [("i", TString), ("j", TString)] (Block [Empty]) (TFun [TString, TString] TString) [])]
 
 initialState = State {
     lastID = 0,
