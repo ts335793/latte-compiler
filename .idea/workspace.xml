@@ -2,13 +2,8 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="3cb52e21-351b-4f83-8a67-771e181d7771" name="Default" comment="">
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/lib/runtime.bc" afterPath="$PROJECT_DIR$/lib/runtime.bc" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/latc_llvm" afterPath="$PROJECT_DIR$/latc_llvm" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/lib/runtime.c" afterPath="$PROJECT_DIR$/lib/runtime.c" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/lib/runtime.ll" afterPath="$PROJECT_DIR$/lib/runtime.ll" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/mrjp-tests/gr5/bfs.lat" afterPath="$PROJECT_DIR$/mrjp-tests/gr5/bfs.lat" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/CodeGeneration.hs" afterPath="$PROJECT_DIR$/src/CodeGeneration.hs" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/Main.hs" afterPath="$PROJECT_DIR$/src/Main.hs" />
     </list>
     <ignored path="LatteCompiler.iws" />
     <ignored path=".idea/workspace.xml" />
@@ -44,7 +39,7 @@
         <entry file="file://$PROJECT_DIR$/good/coreSTR.lat">
           <provider selected="true" editor-type-id="text-editor">
             <state vertical-scroll-proportion="0.0">
-              <caret line="8" column="11" selection-start-line="8" selection-start-column="11" selection-end-line="8" selection-end-column="11" />
+              <caret line="9" column="1" selection-start-line="9" selection-start-column="1" selection-end-line="9" selection-end-column="1" />
               <folding />
             </state>
           </provider>
@@ -73,8 +68,8 @@
       <file leaf-file-name="CodeGeneration.hs" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/src/CodeGeneration.hs">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.9433071">
-              <caret line="85" column="29" selection-start-line="85" selection-start-column="29" selection-end-line="85" selection-end-column="29" />
+            <state vertical-scroll-proportion="0.7285068">
+              <caret line="622" column="20" selection-start-line="622" selection-start-column="20" selection-end-line="622" selection-end-column="20" />
               <folding />
             </state>
           </provider>
@@ -1032,7 +1027,7 @@
     <entry file="file://$PROJECT_DIR$/good/coreSTR.lat">
       <provider selected="true" editor-type-id="text-editor">
         <state vertical-scroll-proportion="0.0">
-          <caret line="8" column="11" selection-start-line="8" selection-start-column="11" selection-end-line="8" selection-end-column="11" />
+          <caret line="9" column="1" selection-start-line="9" selection-start-column="1" selection-end-line="9" selection-end-column="1" />
           <folding />
         </state>
       </provider>
@@ -1055,8 +1050,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/src/CodeGeneration.hs">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.9433071">
-          <caret line="85" column="29" selection-start-line="85" selection-start-column="29" selection-end-line="85" selection-end-column="29" />
+        <state vertical-scroll-proportion="0.7285068">
+          <caret line="622" column="20" selection-start-line="622" selection-start-column="20" selection-end-line="622" selection-end-column="20" />
           <folding />
         </state>
       </provider>

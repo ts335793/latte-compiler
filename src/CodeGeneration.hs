@@ -123,7 +123,7 @@ data Instruction = IBin TypeValue TypeValue BinOp TypeValue
                  | IFunDefEnd
                  | IStringConstant TypeValue String
                  | IDeclare Type String [Type]
-                 | IPhi TypeValue [TypeValue]
+                 | IPhi TypeValue [(TypeValue, TypeValue)]
 
 showTypeValues :: [TypeValue] -> String
 showTypeValues [] = ""
@@ -149,7 +149,11 @@ instance Show Instruction where
             showTypes [] = ""
             showTypes [t] = show t
             showTypes (t : ts) = showTypes [t] ++ ", " ++ showTypes ts
-    show (IPhi x xs) = "\t" ++ show x ++ " = PHI PHI PHI " ++ showTypeValues xs
+    show (IPhi (t, v) xs) = "\t" ++ show v ++ " = phi " ++ show t ++ " " ++ showPhiArgs xs
+        where
+            showPhiArgs [] = ""
+            showPhiArgs [((_, v), (_, l))] = "[" ++ show v ++ ", " ++ show l ++ "]"
+            showPhiArgs (x : xs) = showPhiArgs [x] ++ ", " ++ showPhiArgs xs
 
 data Function = Function {
     functionArgs :: [(String, Type)],
@@ -505,8 +509,9 @@ genStmt (SExp e) = void $ genExpr e
 
 -- generate function
 
-genFunction :: String -> Function -> GM ()
-genFunction f (Function args b (TFun _ rt) _) =
+genFunction :: String -> Function -> GM [Instruction]
+genFunction f (Function args b (TFun _ rt) _) = do
+    cleanInstructions
     frame (do
         rs <- mapM (newRegister . snd) args
         forM_ (zip args rs) (\((n, _), r) -> setLocal n r)
@@ -517,6 +522,7 @@ genFunction f (Function args b (TFun _ rt) _) =
         emit $ ICall (TVoid, VVoid) "_no_return" []
         emit $ IReturn (rt, defaultValue rt)
         emit IFunDefEnd)
+    getInstructions
 
 -- convert instructions to graph
 
@@ -528,13 +534,11 @@ removeUnreachableInstructions is = takeWhile (not . isFinal) is ++ [head (dropWh
         isFinal IReturn {} = True
         isFinal _ = False
 
-loadGraph :: [Instruction] -> GM ()
-loadGraph is' = do
-    setGraph (Graph ps rt sl M.empty)
-    forM_ iss2 (\(l, i) -> setGraphBlock l (Block S.empty i))
-    mapM_ (\(l, b) -> do
-        let o = blockOutputs (trace ("dodaje blok " ++ show b) b)
-        forM_ o (\x -> addEdge l (trace ("ASDSAdodaje krawedz " ++ show l ++ " " ++ show x) x))) . M.toList =<< getGraphBlocks
+createGraphFromInstructions :: [Instruction] -> GM ()
+createGraphFromInstructions is' = do
+    setGraph $ Graph ps rt sl M.empty
+    forM_ iss2 (\(l, bis) -> setGraphBlock l (Block S.empty bis))
+    mapM_ (\(l, b) -> forM_ (blockOutputs b) (\x -> addEdge l x)) . M.toList =<< getGraphBlocks
     where
         IFunDefBegin rt f ps = head is'
         is = tail $ take (length is' - 1) is' -- function body
@@ -554,7 +558,7 @@ loadGraph is' = do
                 is' = drop (length b) is
                 bs = splitInstructions is'
 
--- find block alive variables
+-- find alive variables
 
 filterRegisters :: Set TypeValue -> Set TypeValue
 filterRegisters = S.filter isRegister
@@ -584,7 +588,7 @@ useI (IAllocate _) = S.empty
 useI (IGetPointer _ xs) = filterRegisters $ S.fromList xs
 
 inI :: Instruction -> Set TypeValue -> Set TypeValue
-inI i out = (out `S.difference` killI (trace ("DUPA " ++ show i) i)) `S.union` useI i
+inI i out = (out `S.difference` killI i) `S.union` useI i
 
 inB :: Block -> Set TypeValue -> Set TypeValue
 inB b out = foldr inI out (blockInstructions b)
@@ -602,95 +606,22 @@ aliveVariables g = fix $ inG g
 
 -- insert phi
 
-insertPhi :: GM ()
-insertPhi = do
+generatePhiCalls :: GM ()
+generatePhiCalls = do
     g <- getGraph
     let av = aliveVariables g
     for_ (M.toList (trace ("FIX POINT TO: " ++ show av ++ "\n\n") av)) (\(l, s) -> do
         bi <- getBlockInstructions l
-        setBlockInstructions l $ traceShowId ((map (\x -> IPhi x []) (S.toList s)) ++ bi))
+        setBlockInstructions l ((map (\x -> IPhi x []) (S.toList s)) ++ bi))
 
 -- all function
 
 getFunctionCode :: String -> Function -> GM [Instruction]
 getFunctionCode n f = do
-    cleanInstructions
-    genFunction n f
-    loadGraph =<< getInstructions
-    insertPhi
+    is <- genFunction n f
+    createGraphFromInstructions is
+    generatePhiCalls
     graphToInstructions n <$> getGraph
-
-{-pierwszy - generacja listy instrukcji -- DONE
-drugi będzie: stworzenie grafu z listy instrukcji -- DONE
-trzeci wyznaczenie zmiennych żywych
-czwarty - wsadzenie fi
-piąty - ssa-}
-{-data Block = Block {
-    blockInputs       :: Set TypeValue,
-    blockInstructions :: [Instruction]
-}
-
-blockOutputs :: Block -> Set TypeValue
-blockOutputs (Block _ is) = instructionOutputs $ last is
-    where
-        instructionOutputs (IBr [a]) = S.singleton a
-        instructionOutputs (IBr [_, b, c]) = S.fromList [b, c]
-        instructionOutputs _ = S.empty
-
-blockToInstructions :: TypeValue -> Block -> [Instruction]
-blockToInstructions l (Block _ is) = ILabel l : is
-
-instructionsToBlock :: [Instruction] -> (TypeValue, Block)
-instructionsToBlock (ILabel l : is) = (l, Block S.empty is)
-
-removeUnreachableInstructions :: [Instruction] -> [Instruction]
-removeUnreachableInstructions is = takeWhile help is ++ [head (dropWhile (not . help) is)]
-    where
-        help :: Instruction -> Bool
-        help IBr {} = False
-        help IReturn {} = False
-        help _ = True
-
-data Graph = Graph {
-    graphParameters :: [TypeValue],
-    graphReturnType :: Type,
-    graphSource     :: TypeValue,
-    graphBlocks     :: Map TypeValue Block
-}
-
-graphToInstructions :: String -> Graph -> [Instruction]
-graphToInstructions f (Graph ps rt l bs) = a ++ b ++ c ++ d
-    where
-        a = [IFunDefBegin rt f ps]
-        b = blockToInstructions l (bs M.! l)
-        c = concatMap (uncurry blockToInstructions) (M.toList (M.delete l bs))
-        d = [IFunDefEnd]
-
-isLabel :: Instruction -> Bool
-isLabel (ILabel l) = True
-isLabel _ = False
-
-splitInstructions :: [Instruction] -> [[Instruction]]
-splitInstructions (i : is) = b : bs
-    where
-        b = i : takeWhile (not . isLabel) is
-        is' = drop (length b) (i : is)
-        bs = splitInstructions is'
-
-instructionsToGraph :: [Instruction] -> (String, Graph)
-instructionsToGraph is' = (f, Graph ps rt l (M.fromList bs))
-    where
-        IFunDefBegin rt f ps = head is'
-        is = tail $ take (length is' - 1) is'
-        ILabel l = head is
-        sis = map removeUnreachableInstructions (splitInstructions is)
-        bs = map instructionsToBlock sis
-
-addEdge :: TypeValue -> TypeValue -> Graph -> Graph
-addEdge l1 l2 g@(Graph _ _ _ bs) = g { graphBlocks = M.insert  }
-    where
-        b2@(Block inps _) = bs M.! l2
-        b2' = b2 { blockInputs = S.insert l1 inps }-}
 
 -- collect definitions
 
@@ -723,9 +654,10 @@ codeGeneration p = do
 codeGeneration2 :: Program -> GM [Instruction]
 codeGeneration2 p = do
     getDefsInProgram p
-    concatMapM (uncurry getFunctionCode) . filter (\(k,_) -> not (M.member k builtInFunctions)) . M.toList =<< getFunctions
-    --mapM_ (\(s, tv) -> emit $ IStringConstant tv s) . M.toList =<< getStringConstants
-    --mapM_ (\(s, Function _ _ (TFun argts rt) _) -> emit $ IDeclare rt s argts) (M.toList builtInFunctions)
+    is1 <- concatMapM (uncurry getFunctionCode) . filter (\(k,_) -> not (M.member k builtInFunctions)) . M.toList =<< getFunctions
+    is2 <- map (\(s, tv) -> IStringConstant tv s) . M.toList <$> getStringConstants
+    let is3 = map (\(s, Function _ _ (TFun argts rt) _) -> IDeclare rt s argts) (M.toList builtInFunctions)
+    return $ is1 ++ is2 ++ is3
 
 builtInFunctions = M.fromList [("printString", Function [("s", TString)] (Abs.Block []) (TFun [TString] TVoid) []),
                                ("printInt",    Function [("i", TInt)]    (Abs.Block []) (TFun [TInt] TVoid)    []),
