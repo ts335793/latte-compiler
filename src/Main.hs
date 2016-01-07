@@ -34,7 +34,7 @@ main = do
                     putStrLn $ unlines $ map show (sort xs)
                 Right () ->
                     --print $ runSemanticAnalysis' ast
-                    case runCodeGeneration ast of
+                    case runCodeGeneration2 ast of
                         Left m -> do
                             putStrLn "ERROR"
                             putStrLn m
@@ -42,4 +42,5 @@ main = do
                             putStrLn "OK"
                             putStrLn $ unlines $ map show xs
                             writeFile llPath (unlines $ map show xs)
+                            print $ runCodeGeneration2' ast
 

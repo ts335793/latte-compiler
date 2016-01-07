@@ -7,6 +7,7 @@ target triple = "x86_64-unknown-linux-gnu"
 
 @.str = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 @.str.1 = private unnamed_addr constant [14 x i8] c"runtime error\00", align 1
+@.str.2 = private unnamed_addr constant [20 x i8] c"no return statement\00", align 1
 @stdin = external global %struct._IO_FILE*, align 8
 
 ; Function Attrs: nounwind uwtable
@@ -42,6 +43,15 @@ define void @error() #0 {
 
 ; Function Attrs: noreturn nounwind
 declare void @exit(i32) #2
+
+; Function Attrs: nounwind uwtable
+define void @_no_return() #0 {
+  %1 = call i32 @puts(i8* getelementptr inbounds ([20 x i8], [20 x i8]* @.str.2, i32 0, i32 0))
+  call void @exit(i32 -1) #5
+  unreachable
+                                                  ; No predecessors!
+  ret void
+}
 
 ; Function Attrs: nounwind uwtable
 define i32 @readInt() #0 {

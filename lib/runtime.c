@@ -13,6 +13,10 @@ void error() {
     puts("runtime error");
     exit(-1);
 }
+void _no_return() {
+    puts("no return statement");
+    exit(-1);
+}
 int readInt() {
     int i;
     scanf("%d\n", &i);
