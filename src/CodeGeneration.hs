@@ -123,7 +123,7 @@ data Instruction = IBin TypeValue TypeValue BinOp TypeValue
                  | IFunDefEnd
                  | IStringConstant TypeValue String
                  | IDeclare Type String [Type]
-                 | IPhi TypeValue [(TypeValue, TypeValue)]
+                 | IPhi TypeValue TypeValue [(TypeValue, TypeValue)]
 
 showTypeValues :: [TypeValue] -> String
 showTypeValues [] = ""
@@ -149,7 +149,7 @@ instance Show Instruction where
             showTypes [] = ""
             showTypes [t] = show t
             showTypes (t : ts) = showTypes [t] ++ ", " ++ showTypes ts
-    show (IPhi (t, v) xs) = "\t" ++ show v ++ " = phi " ++ show t ++ " " ++ showPhiArgs xs
+    show (IPhi (t, v) _ xs) = "\t" ++ show v ++ " = phi " ++ show t ++ " " ++ showPhiArgs xs
         where
             showPhiArgs [] = ""
             showPhiArgs [((_, v), (_, l))] = "[" ++ show v ++ ", " ++ show l ++ "]"
@@ -519,8 +519,10 @@ genFunction f (Function args b (TFun _ rt) _) = do
         lEntry <- newLabel
         emit $ ILabel lEntry
         genBlock b
-        emit $ ICall (TVoid, VVoid) "_no_return" []
-        emit $ IReturn (rt, defaultValue rt)
+        if' (rt == TVoid)
+            (   emit $ IReturn (TVoid, VVoid))
+            (do emit $ ICall (TVoid, VVoid) "_no_return" []
+                emit $ IReturn (rt, defaultValue rt))
         emit IFunDefEnd)
     getInstructions
 
@@ -606,13 +608,72 @@ aliveVariables g = fix $ inG g
 
 -- insert phi
 
-generatePhiCalls :: GM ()
-generatePhiCalls = do
+insertPhiCalls :: GM ()
+insertPhiCalls = do
     g <- getGraph
     let av = aliveVariables g
-    for_ (M.toList (trace ("FIX POINT TO: " ++ show av ++ "\n\n") av)) (\(l, s) -> do
+    for_ (M.toList av) (\(l, s) -> do
         bi <- getBlockInstructions l
-        setBlockInstructions l ((map (\x -> IPhi x []) (S.toList s)) ++ bi))
+        setBlockInstructions l ((map (\x -> IPhi x x []) (S.toList s)) ++ bi))
+
+-- reassign registers to make ssa
+
+repIfEq :: TypeValue -> TypeValue -> TypeValue -> TypeValue
+repIfEq tv old new = if'(tv == old) new tv
+
+replaceAllUses :: Instruction -> TypeValue -> TypeValue -> Instruction
+replaceAllUses (IBin l r1 op r2) old new = IBin (repIfEq l old new) (repIfEq r1 old new) op (repIfEq r2 old new)
+replaceAllUses (ICmp l r1 op r2) old new = ICmp (repIfEq l old new) (repIfEq r1 old new) op (repIfEq r2 old new)
+replaceAllUses (IBr xs) old new = IBr $ map (\x -> repIfEq x old new) xs
+replaceAllUses (ICall l f xs) old new = ICall (repIfEq l old new) f (map (\x -> repIfEq x old new) xs)
+replaceAllUses (IAssign l r) old new = IAssign (repIfEq l old new) (repIfEq r old new)
+replaceAllUses (IReturn r) old new = IReturn (repIfEq r old new)
+replaceAllUses (IAllocate l) old new = IAllocate (repIfEq l old new)
+replaceAllUses (IGetPointer l xs) old new = IGetPointer (repIfEq l old new) (map (\x -> repIfEq x old new) xs)
+replaceAllUses (IPhi nx ox xs) old new = IPhi (repIfEq nx old new) ox (map (\(x, y) -> (repIfEq x old new, repIfEq y old new)) xs)
+replaceAllUses x _ _ = x
+
+replaceAllUsesButPhi :: Instruction -> TypeValue -> TypeValue -> Instruction -- all but right side of phi function and old value cache
+replaceAllUsesButPhi (IPhi nx ox xs) old new = IPhi (repIfEq nx old new) ox xs
+replaceAllUsesButPhi i old new = replaceAllUses i old new
+
+getLeftSides :: Instruction -> Set TypeValue
+getLeftSides (IPhi nx _ _) = S.singleton nx
+getLeftSides x = killI x
+
+updatePhiParametersInBlock :: TypeValue -> TypeValue -> Map TypeValue TypeValue -> GM ()
+updatePhiParametersInBlock l n m = do
+    bi <- getBlockInstructions l
+    let bi' = foldr help [] bi
+    setBlockInstructions l bi'
+    where
+        help :: Instruction -> [Instruction] -> [Instruction]
+        help (IPhi nx ox xs) acc = IPhi nx ox ((m M.! ox, n) : xs): acc
+        help x acc = x:acc
+
+reassignRegistersInBlock :: TypeValue -> GM ()
+reassignRegistersInBlock l = do
+    is <- getBlockInstructions l
+    let rs = S.toList $ foldl (\acc i -> acc `S.union` getLeftSides i) S.empty is
+    m <- mapM (\r@(t, _) -> do
+        nr <- newRegister t
+        return (r, nr)) rs
+    let is' = map (\i -> foldl (\i' (r, nr) -> replaceAllUsesButPhi i' r nr) i m) is
+    setBlockInstructions l is'
+    ns <- blockOutputs <$> getGraphBlock l
+    for_ ns (\n -> updatePhiParametersInBlock n l (M.fromList m))
+
+-- remove assignments
+
+removeAssignments :: [Instruction] -> [Instruction]
+removeAssignments is = help is []
+    where
+        help :: [Instruction] -> [(TypeValue, TypeValue)] -> [Instruction]
+        help [] _ = []
+        help ((IAssign l r) : xs) m = help xs ((l, r) : m)
+        help (x : xs) m =
+            let x' = foldl (\i (a, b) -> replaceAllUses i a b) x m
+            in x' : help xs m
 
 -- all function
 
@@ -620,8 +681,11 @@ getFunctionCode :: String -> Function -> GM [Instruction]
 getFunctionCode n f = do
     is <- genFunction n f
     createGraphFromInstructions is
-    generatePhiCalls
-    graphToInstructions n <$> getGraph
+    insertPhiCalls
+    return is
+    --graphToInstructions n <$> getGraph
+    {-mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
+    removeAssignments . graphToInstructions n <$> getGraph-}
 
 -- collect definitions
 

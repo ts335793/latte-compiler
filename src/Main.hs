@@ -33,7 +33,6 @@ main = do
                     putStrLn "ERROR"
                     putStrLn $ unlines $ map show (sort xs)
                 Right () ->
-                    --print $ runSemanticAnalysis' ast
                     case runCodeGeneration2 ast of
                         Left m -> do
                             putStrLn "ERROR"
