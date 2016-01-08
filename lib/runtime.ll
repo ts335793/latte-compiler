@@ -8,9 +8,8 @@ target triple = "x86_64-unknown-linux-gnu"
 @.str = private unnamed_addr constant [4 x i8] c"%d\0A\00", align 1
 @.str.1 = private unnamed_addr constant [14 x i8] c"runtime error\00", align 1
 @stderr = external global %struct._IO_FILE*, align 8
-@.str.2 = private unnamed_addr constant [20 x i8] c"no return statement\00", align 1
 @stdin = external global %struct._IO_FILE*, align 8
-@.str.3 = private unnamed_addr constant [3 x i8] c"%d\00", align 1
+@.str.2 = private unnamed_addr constant [3 x i8] c"%d\00", align 1
 
 ; Function Attrs: nounwind uwtable
 define void @printInt(i32 %i) #0 {
@@ -48,18 +47,6 @@ declare i32 @fputs(i8*, %struct._IO_FILE*) #1
 
 ; Function Attrs: noreturn nounwind
 declare void @exit(i32) #2
-
-; Function Attrs: nounwind uwtable
-define void @_no_return(i8* %s) #0 {
-  %1 = alloca i8*, align 8
-  store i8* %s, i8** %1, align 8
-  %2 = load %struct._IO_FILE*, %struct._IO_FILE** @stderr, align 8
-  %3 = call i32 @fputs(i8* getelementptr inbounds ([20 x i8], [20 x i8]* @.str.2, i32 0, i32 0), %struct._IO_FILE* %2)
-  call void @exit(i32 -1) #5
-  unreachable
-                                                  ; No predecessors!
-  ret void
-}
 
 ; Function Attrs: nounwind uwtable
 define i8* @readString() #0 {
@@ -101,7 +88,7 @@ declare i64 @strlen(i8*) #3
 ; Function Attrs: nounwind uwtable
 define i32 @readInt() #0 {
   %i = alloca i32, align 4
-  %1 = call i32 (i8*, ...) @__isoc99_scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.3, i32 0, i32 0), i32* %i)
+  %1 = call i32 (i8*, ...) @__isoc99_scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.2, i32 0, i32 0), i32* %i)
   %2 = load i32, i32* %i, align 4
   ret i32 %2
 }

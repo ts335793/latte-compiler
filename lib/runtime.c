@@ -13,10 +13,6 @@ void error() {
     fputs("runtime error", stderr);
     exit(-1);
 }
-void _no_return(char * s) {
-    fputs("no return statement", stderr);
-    exit(-1);
-}
 char * readString() {
     char * line = NULL;
     size_t size;

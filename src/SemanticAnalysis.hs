@@ -9,6 +9,7 @@ import           Control.Monad.Except
 import           Control.Monad.Extra
 import           Control.Monad.State  hiding (State)
 import qualified Control.Monad.State  as St
+import           Data.Composition
 import           Data.Foldable
 import           Data.List
 import           Data.List.Utils
@@ -18,6 +19,7 @@ import           Data.Set             (Set)
 import qualified Data.Set             as S
 import           Prelude              hiding (error)
 import           Util
+import           Debug.Trace
 -- position
 
 type Position = (Int, Int)
@@ -764,6 +766,92 @@ createVirtuals = throwNotNull =<< concatMapM (errors . dfs) =<< filter (/= "obje
             exs2 <- concatMapM (errors . dfs) =<< neighbours c
             throwNotNull $ exs1 ++ exs2
 
+-- check return statements
+
+data Value = VInt Int
+           | VString String
+           | VBool Bool
+           | VNullRef
+           deriving (Eq, Ord)
+
+getConstExpr :: Expr -> Maybe Value
+getConstExpr EVar {} = Nothing
+getConstExpr (ELitInt i) = Just $ VInt $ fromInteger i
+getConstExpr (EString s) = Just $ VString s
+getConstExpr ELitTrue = Just $ VBool True
+getConstExpr ELitFalse = Just $ VBool False
+getConstExpr ENull = Just VNullRef
+getConstExpr ESelect {} = Nothing
+getConstExpr EMetCall {} = Nothing
+getConstExpr EAt {} = Nothing
+getConstExpr EApp {} = Nothing
+getConstExpr (ENeg e) =
+    case getConstExpr e of
+        Just (VInt i) -> Just $ VInt (-i)
+        _ -> Nothing
+getConstExpr (ENot e) =
+    case getConstExpr e of
+        Just (VBool b) -> Just $ VBool (not b)
+        _ -> Nothing
+getConstExpr (EIncr e) = getConstExpr e
+getConstExpr (EDecr e) = getConstExpr e
+getConstExpr ENewVar {} = Nothing
+getConstExpr ENewArr {} = Nothing
+getConstExpr (ECastVar _ e) = getConstExpr e
+getConstExpr (ECastArr _ e) = getConstExpr e
+getConstExpr (EMul e1 Times e2) = liftM2 (\(VInt a) (VInt b) -> VInt $ a * b) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (EMul e1 Div e2) = liftM2 (\(VInt a) (VInt b) -> VInt $ a `div` b) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (EMul e1 Mod e2) = liftM2 (\(VInt a) (VInt b) -> VInt $ a `rem` b) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (EAdd e1 Plus e2) =
+    case (getConstExpr e1, getConstExpr e2) of
+        (Just (VInt a), Just (VInt b)) -> Just $ VInt $ a + b
+        (Just (VString a), Just (VString b)) -> Just $ VString $ a ++ b
+        _ -> Nothing
+getConstExpr (EAdd e1 Minus e2) = liftM2 (\(VInt a) (VInt b) -> VInt $ a - b) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (ERel e1 LTH e2) = liftM2 (VBool .: (<)) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (ERel e1 LE e2) = liftM2 (VBool .: (<=)) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (ERel e1 GTH e2) = liftM2 (VBool .: (>)) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (ERel e1 GE e2) = liftM2 (VBool .: (>=)) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (ERel e1 EQU e2) = liftM2 (VBool .: (==)) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (ERel e1 NE e2) = liftM2 (VBool .: (/=)) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (EAnd e1 e2) = liftM2 (\(VBool a) (VBool b) -> VBool $ a && b) (getConstExpr e1) (getConstExpr e2)
+getConstExpr (EOr e1 e2) =
+    case (getConstExpr e1, getConstExpr e2) of
+        (_, Just (VBool True)) -> Just $ VBool True
+        (Just (VBool True), _) -> Just $ VBool True
+        (Just (VBool False), Just (VBool False)) -> Just $ VBool False
+        _ -> Nothing
+
+blockAlwaysReturns :: Block -> Bool
+blockAlwaysReturns (Block xs) = any stmtAlwaysReturns xs
+
+stmtAlwaysReturns :: Stmt -> Bool
+stmtAlwaysReturns Empty = False
+stmtAlwaysReturns (BStmt b) = blockAlwaysReturns b
+stmtAlwaysReturns Decl {} = False
+stmtAlwaysReturns Ass {} = False
+stmtAlwaysReturns Ret {} = True
+stmtAlwaysReturns VRet = True
+stmtAlwaysReturns (Cond e s) =
+    case getConstExpr e of
+        Just (VBool True) -> stmtAlwaysReturns s
+        _ -> False
+stmtAlwaysReturns (CondElse e s1 s2) =
+    case getConstExpr e of
+        Just (VBool True) -> stmtAlwaysReturns s1
+        Just (VBool False) -> stmtAlwaysReturns s2
+        _ -> stmtAlwaysReturns s1 && stmtAlwaysReturns s2
+stmtAlwaysReturns (While e s) =
+    case getConstExpr e of
+        Just (VBool True) -> True
+        _ -> False
+stmtAlwaysReturns For {} = False
+stmtAlwaysReturns SExp {} = False
+
+functionAlwaysReturns :: Function -> Bool
+functionAlwaysReturns (Function _ _ (TFun _ TVoid) _) = True
+functionAlwaysReturns (Function _ b _ _) = blockAlwaysReturns b
+
 -- semantic analysis
 
 semanticAnalysis :: Program -> CM ()
@@ -777,6 +865,9 @@ semanticAnalysis p = do
     exs5 <- concatMapM (\c -> concatMapM (errors . checkMethod c) . M.elems =<< getMethods c) . M.keys =<< getClasses
     exs6 <- errors $ checkUnlocalizedM (isFunction "main") "No main function."
     throwNotNull $ exs3 ++ exs4 ++ exs5 ++ exs6
+    exs7 <- concatMapM (errors . (\(n, f) -> checkUnlocalized (functionAlwaysReturns f) (n ++ " does not always return."))) . M.toList =<< getFunctions
+    exs8 <- concatMapM (\c -> concatMapM (errors . (\(n, f) -> checkUnlocalized (functionAlwaysReturns f) (n ++ " in " ++ c ++ " does not always return."))) . M.toList =<< getMethods c) . M.keys =<< getClasses
+    throwNotNull $ exs7 ++ exs8
 
 -- run
 

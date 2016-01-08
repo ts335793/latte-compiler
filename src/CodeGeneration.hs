@@ -609,10 +609,7 @@ genFunction f (Function args b (TFun _ rt) _) = do
         lEntry <- newLabel
         emit $ ILabel lEntry
         genBlock b
-        if' (rt == TVoid)
-            (   emit $ IReturn (TVoid, VVoid))
-            (do emit $ ICall (TVoid, VVoid) "_no_return" []
-                emit $ IReturn (rt, defaultValue rt))
+        emit $ IReturn (rt, defaultValue rt)
         emit IFunDefEnd)
     getInstructions
 
@@ -903,7 +900,6 @@ builtInFunctions = M.fromList [("printString", Function [("s", TString)] (Abs.Bl
                                ("readInt",     Function []               (Abs.Block []) (TFun [] TInt)         []),
                                ("readString",  Function []               (Abs.Block []) (TFun [] TString)      []),
                                ("error",       Function []               (Abs.Block []) (TFun [] TVoid)        []),
-                               ("_no_return",  Function []               (Abs.Block []) (TFun [] TVoid)        []),
                                ("_strlen",     Function [("s", TString)] (Abs.Block []) (TFun [TString] TInt)  []),
                                ("_malloc",     Function [("i", TInt)]    (Abs.Block []) (TFun [TInt] TString)  []),
                                ("_strcat",     Function [("i", TString), ("j", TString)] (Abs.Block [Empty]) (TFun [TString, TString] TString) []),

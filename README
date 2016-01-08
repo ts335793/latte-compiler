@@ -3,6 +3,7 @@ Autor: Tomasz Stęczniewski ts335793
 Uruchamianie i kompilacja
 - kompilacja: make
 - uruchamianie: ./latc_llvm input.ll
+W labach nie udało mi się skompilować projektu z powodu nie istniejących pakietów cabala.
 
 Użyte biblioteki
 array, base, cond, control-bool, containers, ghc, extra, keys, monad-loops, mtl, MissingH, transformers
@@ -18,7 +19,6 @@ Analiza semantyczna
   Można odwołać się do pól nadklasy/podklasy poprzez rzutowanie self na nadklasę/podklasę.
 - W metodach wywołanie f() najpierw przeszukuje przestrzeń metod, a później funkcji globalnych.
 - Przestrzenie nazw metod, funkcji, klas i zmiennych lokalnych są niezależne (może istnieć klasa i zmienna o nazwie x).
-- Nie sprawdza wyrażeń stałych (stąd testy bad/bad008.lat, bad/bad012.lat, bad/bad021.lat, bad/bad024.lat, bad/bad025.lat są akceptowane i kompilowane)
 
 Kompilator
 - Kompiluje programy w podstawowej wersji języka.
@@ -30,6 +30,7 @@ Kompilator
 - Usuwa nieosiągalne instrukcje.
 - Usuwa martwe zmienne.
 - Usuwa nieosiągalne skoki.
+- Robi propagację kopii.
 
 Funkcje wbudowane
 void printInt(int) - wypisuje int i znak nowej linii
