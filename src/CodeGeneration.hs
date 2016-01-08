@@ -19,6 +19,8 @@ import           Data.Traversable
 import           Debug.Trace
 import           Prelude              hiding (error)
 import           Util
+import Numeric
+import Data.Char
 
 type ID = Int
 
@@ -288,11 +290,15 @@ getStringConstants :: GM (Map String TypeValue)
 getStringConstants = stringConstants <$> get
 
 getStringConstant :: String -> GM TypeValue
-getStringConstant s = do
+getStringConstant s' = do
     unlessM (M.member s <$> getStringConstants)
-        (do c <- newStringGlobalConstant $ length s + 1
+        (do c <- newStringGlobalConstant $ length s' + 1
             modify (\st -> st { stringConstants = M.insert s c (stringConstants st) }))
     (M.! s) . stringConstants <$> get
+    where
+        s = concatMap (\c ->
+            let hex = showHex (ord c) ""
+            in "\\" ++ replicate (2 - length hex) '0' ++ hex) s'
 
 getLocal :: String -> GM TypeValue
 getLocal l = do
