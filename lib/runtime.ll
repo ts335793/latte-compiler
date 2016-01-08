@@ -147,6 +147,21 @@ define i8* @_strcat(i8* %a, i8* %b) #0 {
 declare i8* @strcat(i8*, i8*) #4
 
 ; Function Attrs: nounwind uwtable
+define i32 @_strcmp(i8* %a, i8* %b) #0 {
+  %1 = alloca i8*, align 8
+  %2 = alloca i8*, align 8
+  store i8* %a, i8** %1, align 8
+  store i8* %b, i8** %2, align 8
+  %3 = load i8*, i8** %1, align 8
+  %4 = load i8*, i8** %2, align 8
+  %5 = call i32 @strcmp(i8* %3, i8* %4) #6
+  ret i32 %5
+}
+
+; Function Attrs: nounwind readonly
+declare i32 @strcmp(i8*, i8*) #3
+
+; Function Attrs: nounwind uwtable
 define i8* @_strcpy(i8* %a, i8* %b) #0 {
   %1 = alloca i8*, align 8
   %2 = alloca i8*, align 8

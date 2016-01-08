@@ -45,6 +45,10 @@ char *_strcat(char *a, char *b) {
     return strcat(a, b);
 }
 
+int _strcmp(char *a, char *b) {
+    return strcmp(a, b);
+}
+
 char *_strcpy(char *a, char *b) {
     return strcpy(a, b);
 }

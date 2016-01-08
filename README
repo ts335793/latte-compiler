@@ -7,8 +7,6 @@ Uruchamianie i kompilacja
 Użyte biblioteki
 array, base, cond, control-bool, containers, ghc, extra, keys, monad-loops, mtl, MissingH, transformers
 
-
-
 Analiza semantyczna
 - Traktuje inkrementację i dekrementację jako wyrażenia.
 - Akceptuje język ze wszystkimi rozszerzeniami (tablice, struktury, obiekty, metody wirtualne)
@@ -25,6 +23,7 @@ Analiza semantyczna
 Kompilator
 - Kompiluje programy w podstawowej wersji języka.
 - Traktuje inkrementację i dekrementację jako wyrażenia.
+- Obsługuje operatory relacyjne dla napisów.
 - Generuje kod LLVM w postaci SSA.
 
 Funkcje wbudowane:

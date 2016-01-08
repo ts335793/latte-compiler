@@ -545,7 +545,14 @@ getType (ERel e1 NE e2) = do
     (t2, _) <- getType e2
     checkM ((t1 `isSubtype` t2) ||^ (t2 `isSubtype` t1)) ("!= cannot be used with " ++ show t1 ++ " and " ++ show t2 ++ ".")
     return (TBool, RHS)
-getType (ERel e1 _ e2) = getTypeHelper [(e1, TInt, RHS), (e2, TInt, RHS)] (TBool, RHS)
+getType (ERel e1 _ e2) = do
+    exs <- concatMapM (errors . getType) [e1, e2]
+    throwNotNull exs
+    (t1, _) <- getType e1
+    (t2, _) <- getType e2
+    check ((t1, t2) == (TInt, TInt) || (t1, t2) == (TString, TString)) ("Cannot use <, <=, =>, > with " ++ show t1 ++ " and " ++ show t2)
+    return (TBool, RHS)
+    --getTypeHelper [(e1, TInt, RHS), (e2, TInt, RHS)] (TBool, RHS)
 getType (EAnd e1 e2) = getTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool, RHS)
 getType (EOr e1 e2) = getTypeHelper [(e1, TBool, RHS), (e2, TBool, RHS)] (TBool, RHS)
 

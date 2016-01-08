@@ -380,11 +380,20 @@ notImplemented m = throwError $ m ++ " - not implemented."
 
 genRelCond :: Expr -> RelOp -> Expr -> TypeValue -> TypeValue -> GM ()
 genRelCond e1 op e2 lTrue lFalse = do
-    tv1 <- genExpr e1
-    tv2 <- genExpr e2
-    tvc <- newRegister TBool
-    emit $ ICmp tvc tv1 op tv2
-    emit $ IBr [tvc, lTrue, lFalse]
+    tv1@(t1, _) <- genExpr e1
+    tv2@(t2, _) <- genExpr e2
+    c <- newRegister TBool
+    case (t1, t2) of
+        (TInt, TInt) -> do
+            emit $ ICmp c tv1 op tv2
+        (TString, TString) -> do
+            r <- newRegister TInt
+            emit $ ICall r "_strcmp" [tv1, tv2]
+            emit $ ICmp c r op (TInt, VInt 0)
+        (TBool, TBool) -> do
+            emit $ ICmp c tv1 op tv2
+        _ -> notImplemented $ "compare types " ++ show t1 ++ " " ++ show t2
+    emit $ IBr [c, lTrue, lFalse]
 
 genExprCond :: Expr -> TypeValue -> TypeValue -> GM ()
 genExprCond e lTrue lFalse = do
@@ -740,6 +749,14 @@ removeAssignments l = do
                 (is1, m1) = help is m
             in (i2 : is1, m1)
 
+-- fold constants
+
+{-foldConstants :: [Instruction] -> [Instruction]
+foldConstants xs = map calculate xs
+    where
+        calculate :: Instruction -> Instruction
+        calculate-}
+
 -- all function
 
 getFunctionCode :: String -> Function -> GM [Instruction]
@@ -788,6 +805,7 @@ builtInFunctions = M.fromList [("printString", Function [("s", TString)] (Abs.Bl
                                ("_strlen",     Function [("s", TString)] (Abs.Block []) (TFun [TString] TInt)  []),
                                ("_malloc",     Function [("i", TInt)]    (Abs.Block []) (TFun [TInt] TString)  []),
                                ("_strcat",     Function [("i", TString), ("j", TString)] (Abs.Block [Empty]) (TFun [TString, TString] TString) []),
+                               ("_strcmp",     Function [("i", TString), ("j", TString)] (Abs.Block [Empty]) (TFun [TString, TString] TInt) []),
                                ("_strcpy",     Function [("i", TString), ("j", TString)] (Abs.Block [Empty]) (TFun [TString, TString] TString) [])]
 
 initialState = State {
