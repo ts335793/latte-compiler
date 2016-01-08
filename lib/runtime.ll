@@ -9,6 +9,7 @@ target triple = "x86_64-unknown-linux-gnu"
 @.str.1 = private unnamed_addr constant [14 x i8] c"runtime error\00", align 1
 @.str.2 = private unnamed_addr constant [20 x i8] c"no return statement\00", align 1
 @stdin = external global %struct._IO_FILE*, align 8
+@.str.3 = private unnamed_addr constant [3 x i8] c"%d\00", align 1
 
 ; Function Attrs: nounwind uwtable
 define void @printInt(i32 %i) #0 {
@@ -54,16 +55,6 @@ define void @_no_return() #0 {
 }
 
 ; Function Attrs: nounwind uwtable
-define i32 @readInt() #0 {
-  %i = alloca i32, align 4
-  %1 = call i32 (i8*, ...) @__isoc99_scanf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @.str, i32 0, i32 0), i32* %i)
-  %2 = load i32, i32* %i, align 4
-  ret i32 %2
-}
-
-declare i32 @__isoc99_scanf(i8*, ...) #1
-
-; Function Attrs: nounwind uwtable
 define i8* @readString() #0 {
   %line = alloca i8*, align 8
   %size = alloca i64, align 8
@@ -99,6 +90,19 @@ declare i64 @getline(i8**, i64*, %struct._IO_FILE*) #1
 
 ; Function Attrs: nounwind readonly
 declare i64 @strlen(i8*) #3
+
+; Function Attrs: nounwind uwtable
+define i32 @readInt() #0 {
+  %i = alloca i32, align 4
+  %1 = call i32 (i8*, ...) @__isoc99_scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.3, i32 0, i32 0), i32* %i)
+  %2 = call i32 @getchar()
+  %3 = load i32, i32* %i, align 4
+  ret i32 %3
+}
+
+declare i32 @__isoc99_scanf(i8*, ...) #1
+
+declare i32 @getchar() #1
 
 ; Function Attrs: nounwind uwtable
 define i32 @_strlen(i8* %str) #0 {

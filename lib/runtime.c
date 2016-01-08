@@ -17,11 +17,6 @@ void _no_return() {
     puts("no return statement");
     exit(-1);
 }
-int readInt() {
-    int i;
-    scanf("%d\n", &i);
-    return i;
-}
 char * readString() {
     char * line = NULL;
     size_t size;
@@ -30,6 +25,12 @@ char * readString() {
     last = strlen(line) - 1;
     if (line[last] == '\n') line[last] = '\0';
     return line;
+}
+int readInt() {
+    int i;
+    scanf("%d", &i);
+    getchar(); // read endline
+    return i;
 }
 
 int _strlen(char * str) {
