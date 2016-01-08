@@ -89,8 +89,9 @@ declare i64 @strlen(i8*) #3
 define i32 @readInt() #0 {
   %i = alloca i32, align 4
   %1 = call i32 (i8*, ...) @__isoc99_scanf(i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str.2, i32 0, i32 0), i32* %i)
-  %2 = load i32, i32* %i, align 4
-  ret i32 %2
+  %2 = call i8* @readString()
+  %3 = load i32, i32* %i, align 4
+  ret i32 %3
 }
 
 declare i32 @__isoc99_scanf(i8*, ...) #1

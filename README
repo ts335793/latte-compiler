@@ -5,9 +5,6 @@ Uruchamianie i kompilacja
 - uruchamianie: ./latc_llvm input.ll
 W labach nie udało mi się skompilować projektu z powodu nie istniejących pakietów cabala.
 
-Użyte biblioteki
-array, base, cond, control-bool, containers, ghc, extra, keys, monad-loops, mtl, MissingH, transformers
-
 Analiza semantyczna
 - Traktuje inkrementację i dekrementację jako wyrażenia.
 - Akceptuje język ze wszystkimi rozszerzeniami (tablice, struktury, obiekty, metody wirtualne)
@@ -38,6 +35,3 @@ void printString(string) - wypisuje string i znak nowej linii
 void error() - tak jak w treści
 int readInt() - wczytuje int i resztę linii wraz z enterem
 string readString() - wczytuje linię i enter, zwraca string bez znaku nowej linii
-
-Skompilowany program
-- W przypadku nie zwracenia wartości z funkcji wypisuje błąd na stderr i kończy wywołanie programu.

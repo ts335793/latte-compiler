@@ -25,7 +25,7 @@ char * readString() {
 int readInt() {
     int i;
     scanf("%d", &i);
-    //readString(); // read the rest of the line
+    readString(); // read the rest of the line
     return i;
 }
 
@@ -48,12 +48,3 @@ int _strcmp(char *a, char *b) {
 char *_strcpy(char *a, char *b) {
     return strcpy(a, b);
 }
-
-/*int main() {
-    printInt(111);
-    printString("ala ma kota");
-    printInt(readInt());
-    printString(readString());
-    error();
-    return 0;
-}*/
