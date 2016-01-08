@@ -10,11 +10,11 @@ void printString(char *s) {
     puts(s);
 }
 void error() {
-    puts("runtime error");
+    fputs("runtime error", stderr);
     exit(-1);
 }
-void _no_return() {
-    puts("no return statement");
+void _no_return(char * s) {
+    fputs("no return statement", stderr);
     exit(-1);
 }
 char * readString() {
@@ -29,7 +29,7 @@ char * readString() {
 int readInt() {
     int i;
     scanf("%d", &i);
-    getchar(); // read endline
+    //readString(); // read the rest of the line
     return i;
 }
 

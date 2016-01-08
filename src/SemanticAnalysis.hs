@@ -10,6 +10,7 @@ import           Control.Monad.Extra
 import           Control.Monad.State  hiding (State)
 import qualified Control.Monad.State  as St
 import           Data.Foldable
+import           Data.List
 import           Data.List.Utils
 import           Data.Map             (Map)
 import qualified Data.Map             as M
@@ -17,7 +18,6 @@ import           Data.Set             (Set)
 import qualified Data.Set             as S
 import           Prelude              hiding (error)
 import           Util
-import Data.List
 -- position
 
 type Position = (Int, Int)
@@ -757,24 +757,6 @@ createVirtuals = throwNotNull =<< concatMapM (errors . dfs) =<< filter (/= "obje
             exs2 <- concatMapM (errors . dfs) =<< neighbours c
             throwNotNull $ exs1 ++ exs2
 
--- check paths
-
-{-alwaysReturnsBlock :: Block -> Bool
-alwaysReturnsBlock (Block xs) = any alwaysReturnsStmt xs
-
-alwaysReturnsStmt :: Stmt -> Bool
-alwaysReturnsStmt Empty = False
-alwaysReturnsStmt (BStmt b) = alwaysReturnsBlock b
-alwaysReturnsStmt Decl {} = False
-alwaysReturnsStmt Ass {} = False
-alwaysReturnsStmt Ret {} = True
-alwaysReturnsStmt VRet = True
-alwaysReturnsStmt Cond {} = False
-alwaysReturnsStmt (CondElse _ s1 s2) = all alwaysReturnsStmt [s1, s2]
-alwaysReturnsStmt While {} = False
-alwaysReturnsStmt For {} = False
-alwaysReturnsStmt SExp {} = False-}
-
 -- semantic analysis
 
 semanticAnalysis :: Program -> CM ()
@@ -787,9 +769,7 @@ semanticAnalysis p = do
     exs4 <- concatMapM (errors . checkFunction) . M.elems =<< getFunctions
     exs5 <- concatMapM (\c -> concatMapM (errors . checkMethod c) . M.elems =<< getMethods c) . M.keys =<< getClasses
     exs6 <- errors $ checkUnlocalizedM (isFunction "main") "No main function."
-    -- exs7 <- concatMapM (\(Function _ b _ p) -> errors $ checkAt p (alwaysReturnsBlock b) "Not all paths return.") . M.elems =<< getFunctions
-    -- exs8 <- concatMapM (concatMapM (\(Function _ b _ p) -> errors $ checkAt p (alwaysReturnsBlock b) "Not all paths return.") . M.elems <=< getMethods) . M.keys =<< getClasses
-    throwNotNull $ exs3 ++ exs4 ++ exs5 ++ exs6 -- ++ exs7 ++ exs8
+    throwNotNull $ exs3 ++ exs4 ++ exs5 ++ exs6
 
 -- run
 

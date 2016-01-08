@@ -6,11 +6,12 @@ import           BNFC.LexLatte
 import           BNFC.ParLatte
 import           BNFC.PrintLatte
 import           BNFC.SkelLatte
+import           CodeGeneration
 import           Data.List
 import           SemanticAnalysis
-import CodeGeneration
 import           System.Environment
 import           System.Exit
+import           System.IO
 
 parse :: String -> Either String Program
 parse s =
@@ -24,22 +25,21 @@ main = do
     src <-readFile srcPath
     case parse src of
         Left e -> do
-            putStrLn "ERROR"
-            putStrLn e
+            hPutStrLn stderr "ERROR"
+            die e
         Right ast -> do
             writeFile astPath (show ast)
             case runSemanticAnalysis ast of
                 Left xs -> do
-                    putStrLn "ERROR"
-                    putStrLn $ unlines $ map show (sort xs)
+                    hPutStrLn stderr "ERROR"
+                    die $ unlines $ map show (sort xs)
                 Right () ->
                     case runCodeGeneration ast of
                         Left m -> do
-                            putStrLn "ERROR"
-                            putStrLn m
+                            hPutStrLn stderr "ERROR"
+                            die m
                         Right xs -> do
-                            putStrLn "OK"
-                            --putStrLn $ unlines $ map show xs
+                            hPutStrLn stderr "OK"
                             writeFile llPath (unlines $ map show xs)
                             --print $ runCodeGeneration' ast
 

@@ -2,28 +2,27 @@ module CodeGeneration where
 
 import           BNFC.AbsLatte        hiding (BinOp, Block, RelOp, Type)
 import qualified BNFC.AbsLatte        as Abs
---import           Control.Arrow
 import           Control.Conditional  (if')
 import           Control.Monad.Except
 import           Control.Monad.Extra
 import           Control.Monad.State  hiding (State)
 import qualified Control.Monad.State  as St
+import           Data.Char
 import           Data.Foldable
+import           Data.Key             hiding (zip)
 import           Data.List
 import           Data.List.Utils
 import           Data.Map             (Map)
 import qualified Data.Map             as M
+import           Data.Monoid
 import           Data.Set             (Set)
 import qualified Data.Set             as S
 import           Data.Traversable
+import           Data.Tuple.Extra
 import           Debug.Trace
+import           Numeric
 import           Prelude              hiding (error)
 import           Util
-import Numeric
-import Data.Char
-import Data.Monoid
-import Data.Key hiding (zip)
-import Data.Tuple.Extra
 
 type ID = Int
 
@@ -132,7 +131,7 @@ data Instruction = IBin TypeValue TypeValue BinOp TypeValue
                  | IFunDefEnd
                  | IStringConstant TypeValue String
                  | IDeclare Type String [Type]
-                 | IPhi TypeValue TypeValue [(TypeValue, TypeValue)]
+                 | IPhi TypeValue [(TypeValue, TypeValue)]
 
 showTypeValues :: [TypeValue] -> String
 showTypeValues [] = ""
@@ -158,7 +157,7 @@ instance Show Instruction where
             showTypes [] = ""
             showTypes [t] = show t
             showTypes (t : ts) = showTypes [t] ++ ", " ++ showTypes ts
-    show (IPhi (t, v) _ xs) = "\t" ++ show v ++ " = phi " ++ show t ++ " " ++ showPhiArgs xs
+    show (IPhi (t, v) xs) = "\t" ++ show v ++ " = phi " ++ show t ++ " " ++ showPhiArgs xs
         where
             showPhiArgs [] = ""
             showPhiArgs [((_, v), (_, l))] = "[" ++ show v ++ ", " ++ show l ++ "]"
@@ -173,7 +172,7 @@ liftInstruction f g _ (IAssign l r) = IAssign (f l) (g r)
 liftInstruction _ g _ (IReturn r) = IReturn (g r)
 liftInstruction f _ _ (IAllocate l) = IAllocate (f l)
 liftInstruction f g _ (IGetPointer l rs) = IGetPointer (f l) (map g rs)
-liftInstruction f g h (IPhi l o rs) = IPhi (f l) o (map h rs)
+liftInstruction f g h (IPhi l rs) = IPhi (f l) (map h rs)
 liftInstruction f _ _ (ILabel l) = ILabel (f l)
 
 reduceInstruction :: Monoid m => (TypeValue -> m) -> (TypeValue -> m) -> ((TypeValue, TypeValue) -> m) -> Instruction -> m
@@ -185,7 +184,7 @@ reduceInstruction f g _ (IAssign l r) = f l <> g r
 reduceInstruction _ g _ (IReturn r) = g r
 reduceInstruction f _ _ (IAllocate l) = f l
 reduceInstruction f g _ (IGetPointer l rs) = f l <> mconcat (map g rs)
-reduceInstruction f g h (IPhi l o rs) = f l <> mconcat (map h rs)
+reduceInstruction f g h (IPhi l rs) = f l <> mconcat (map h rs)
 reduceInstruction f _ _ (ILabel l) = f l
 
 isJumpInstruction :: Instruction -> Bool
@@ -222,6 +221,12 @@ blockOutputs (Block _ is) =
 blockToInstructions :: TypeValue -> Block -> [Instruction]
 blockToInstructions l (Block _ is) = ILabel l : is
 
+getBlockInputs :: TypeValue -> GM (Set TypeValue)
+getBlockInputs l = blockInputs <$> getGraphBlock l
+
+getBlockOutputs :: TypeValue -> GM [TypeValue]
+getBlockOutputs l = blockOutputs <$> getGraphBlock l
+
 getBlockInstructions :: TypeValue -> GM [Instruction]
 getBlockInstructions l = blockInstructions <$> getGraphBlock l
 
@@ -231,7 +236,7 @@ setBlockInstructions l is = do
     setGraphBlock l b { blockInstructions = is }
 
 data Graph = Graph {
-    graphParameters :: [TypeValue],
+    graphParams     :: [TypeValue],
     graphReturnType :: Type,
     graphSource     :: TypeValue,
     graphBlocks     :: Map TypeValue Block
@@ -247,6 +252,9 @@ graphToInstructions f (Graph ps rt l bs) = a ++ b ++ c ++ d
 
 getGraphSource :: GM TypeValue
 getGraphSource = graphSource <$> getGraph
+
+getGraphParams :: GM [TypeValue]
+getGraphParams = graphParams <$> getGraph
 
 getGraphBlocks :: GM (Map TypeValue Block)
 getGraphBlocks = graphBlocks <$> getGraph
@@ -600,11 +608,8 @@ removeUnreachableInstructions is =
 createGraphFromInstructions :: [Instruction] -> GM ()
 createGraphFromInstructions is' = do
     setGraph $ Graph ps rt sl M.empty
-    forM_ iss2 (\(l, bis) ->
-        setGraphBlock l (Block S.empty bis))
-    mapM_ (\(l, b) ->
-        forM_ (blockOutputs b)
-            (\x -> addGraphEdge l x)) . M.toList =<< getGraphBlocks
+    forM_ iss2 (\(l, bis) -> setGraphBlock l (Block S.empty bis))
+    mapWithKeyM_ (\l b -> forM_ (blockOutputs b) (addGraphEdge l)) =<< getGraphBlocks
     where
         IFunDefBegin rt f ps = head is'
         is = tail $ take (length is' - 1) is' -- function body
@@ -660,11 +665,12 @@ insertPhiCalls :: GM ()
 insertPhiCalls = do
     g <- getGraph
     sl <- getGraphSource
-    mapWithKeyM_ (\l av ->
+    (flip mapWithKeyM_) (aliveVariables g) (\l avs ->
         unless (l == sl)
-            (do bi <- getBlockInstructions l
-                let bi' = (map (\x -> IPhi x x []) (S.toList av)) ++ bi
-                setBlockInstructions l bi')) (aliveVariables g)
+            (do bis <- getBlockInstructions l
+                inputs <- S.toList <$> getBlockInputs l
+                let bis' = (map (\av -> IPhi av (map (\i -> (av, i)) inputs)) (S.toList avs)) ++ bis
+                setBlockInstructions l bis'))
 
 -- reassign registers to make ssa
 
@@ -680,73 +686,59 @@ replaceLeftSides i a b = liftInstruction (replaceIfEqual a b) id id i
 replaceAllUsesButPhiParams :: Instruction -> TypeValue -> TypeValue -> Instruction
 replaceAllUsesButPhiParams i a b = liftInstruction (replaceIfEqual a b) (replaceIfEqual a b) id i
 
-updatePhiParametersInBlock :: TypeValue -> TypeValue -> Map TypeValue TypeValue -> GM ()
-updatePhiParametersInBlock l n m = do
+updatePhiParams :: TypeValue -> Map TypeValue TypeValue -> [(TypeValue, TypeValue)] -> [(TypeValue, TypeValue)]
+updatePhiParams l m [] = []
+updatePhiParams l m ((a, b):xs)
+    | l == b && M.member a m = (m M.! a, l) : updatePhiParams l m xs
+    | otherwise = (a, b) : updatePhiParams l m xs
+
+updatePhiParamsInBlock :: TypeValue -> TypeValue -> Map TypeValue TypeValue -> GM ()
+updatePhiParamsInBlock l n m = do
     bi <- getBlockInstructions l
     let bi' = foldr help [] bi
     setBlockInstructions l bi'
     where
         help :: Instruction -> [Instruction] -> [Instruction]
-        help (IPhi nx ox xs) acc = IPhi nx ox ((m M.! ox, n) : xs): acc
+        help (IPhi nx xs) acc = IPhi nx (updatePhiParams n m xs) : acc
         help x acc = x:acc
 
 reassignRegistersInBlock :: TypeValue -> GM ()
 reassignRegistersInBlock l = do
     is <- getBlockInstructions l
-    sl <- graphSource <$> getGraph
-    bm <- if' (l == sl)
-        (M.fromList . map (\x -> (x, x)) . graphParameters <$> getGraph)
-        (return M.empty)
-    (m, revis) <- foldlM (\(m, is) i -> do
-        (m', i') <- case leftSideInstruction i of
-                [] -> return (m, i)
+    sl <- getGraphSource
+    m0 <- if' (l == sl) (M.fromList . map dupe <$> getGraphParams) (return M.empty)
+    (m, revis) <- foldlM (\(m1, is) i -> do
+        (m2, i1) <-
+            case leftSideInstruction i of
+                [] -> return (m1, i)
                 [r@(t, _)] -> do
                     nr <- newRegister t
-                    return (M.insert r nr m, replaceLeftSides i r nr)
-        let i''' = foldl (\i'' (r, nr) -> replaceAllUsesButPhiParams i'' r nr) i' (M.toList m)
-        return (m', i''' : is)) (bm, []) is
+                    return (M.insert r nr m1, replaceLeftSides i r nr)
+        let i3 = foldl (\i2 (r, nr) -> replaceAllUsesButPhiParams i2 r nr) i1 (M.toList m1)
+        return (m2, i3 : is)) (m0, []) is
     setBlockInstructions l (reverse revis)
-    ns <- blockOutputs <$> getGraphBlock l
-    --for_ ns (\n -> updatePhiParametersInBlock n l (trace ("dla " ++ show l ++ " " ++ show m) m))
-    for_ ns (\n -> updatePhiParametersInBlock n l m)
+    os <- getBlockOutputs l
+    for_ os (\o -> updatePhiParamsInBlock o l m)
 
 -- remove assignments
 
-updatePhiParametersInBlock' :: TypeValue -> TypeValue -> Map TypeValue TypeValue -> GM ()
-updatePhiParametersInBlock' l n m = do
-    bi <- getBlockInstructions l
-    let bi' = foldr help [] bi
-    setBlockInstructions l bi'
-    where
-        help :: Instruction -> [Instruction] -> [Instruction]
-        help (IPhi nx ox xs) acc = IPhi nx ox (help2 xs) : acc
-        help x acc = x:acc
-
-        help2 :: [(TypeValue, TypeValue)] -> [(TypeValue, TypeValue)]
-        help2 [] = []
-        help2 ((a, b):xs)
-            | b == n && M.member a m = (m M.! a, n) : help2 xs
-            | otherwise = (a, b) : help2 xs
-
-removeAssignments :: TypeValue -> GM () -- code must be in ssa
+removeAssignments :: TypeValue -> GM ()
 removeAssignments l = do
     bi <- getBlockInstructions l
-    let (bi', m) = help bi []
-    --setBlockInstructions l (trace (show l ++ " -> " ++ show m) bi')
+    let (bi', m) = help bi M.empty
     setBlockInstructions l bi'
-    ns <- blockOutputs <$> getGraphBlock l
-    --for_ ns (\n -> updatePhiParametersInBlock' n l (M.fromList (trace ("podmiany w " ++ show l ++ ": " ++ show m) m)))
-    for_ ns (\n -> updatePhiParametersInBlock' n l (M.fromList m))
+    os <- getBlockOutputs l
+    for_ os (\o -> updatePhiParamsInBlock o l m)
     where
-        help :: [Instruction] -> [(TypeValue, TypeValue)] -> ([Instruction], [(TypeValue, TypeValue)])
+        help :: [Instruction] -> Map TypeValue TypeValue -> ([Instruction], Map TypeValue TypeValue)
         help [] m = ([], m)
-        help ((IAssign l r) : xs) m
-            | M.member r (M.fromList m) = help xs ((l, (M.fromList m) M.! r) : m)
-            | otherwise = help xs ((l, r) : m)
-        help (x : xs) m =
-            let x' = foldl (\i (a, b) -> replaceAllUses i a b) x m
-                (xs', m') = help xs m
-            in (x' : xs', m')
+        help ((IAssign l r) : is) m
+            | M.member r m = help is (M.insert l (m M.! r) m)
+            | otherwise = help is (M.insert l r m)
+        help (i : is) m =
+            let i2 = foldlWithKey replaceAllUses i m
+                (is1, m1) = help is m
+            in (i2 : is1, m1)
 
 -- all function
 
@@ -754,14 +746,9 @@ getFunctionCode :: String -> Function -> GM [Instruction]
 getFunctionCode n f = do
     is <- genFunction n f
     createGraphFromInstructions is
-    --return is
     insertPhiCalls
-    --graphToInstructions n <$> getGraph
     mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
     mapM_ removeAssignments . M.keys =<< getGraphBlocks
-    --ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
-    --removeAssignments ps . graphToInstructions n <$> getGraph
-    --removeAssignments (traceShowId ps) . graphToInstructions n <$> getGraph
     graphToInstructions n <$> getGraph
 
 -- collect definitions

@@ -1,8 +1,11 @@
 .PHONY: all
-all: dist/build/LatteCompiler/LatteCompiler
+all: latc
 
 dist/build/LatteCompiler/LatteCompiler: src/Main.hs src/SemanticAnalysis.hs src/CodeGeneration.hs src/BNFC/AbsLatte.hs src/BNFC/ErrM.hs src/BNFC/LexLatte.hs src/BNFC/ParLatte.hs src/BNFC/PrintLatte.hs src/BNFC/SkelLatte.hs lib/runtime.bc
 	cabal build
+
+latc: dist/build/LatteCompiler/LatteCompiler
+	cp dist/build/LatteCompiler/LatteCompiler latc
 
 src/BNFC/AbsLatte.hs src/BNFC/ErrM.hs src/BNFC/LexLatte.hs src/BNFC/ParLatte.hs src/BNFC/PrintLatte.hs src/BNFC/SkelLatte.hs: src/Latte.cf
 	cd src && bnfc -p BNFC Latte.cf

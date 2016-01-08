@@ -6,11 +6,11 @@ do
 	./latc_llvm $f
 done
 
-#for f in $(find mrjp-tests/bad -name '*.lat')
-#do
-#	echo $f
-#	./latc_llvm $f
-#done
+for f in $(find mrjp-tests/bad -name '*.lat')
+do
+	echo $f
+	./latc_llvm $f
+done
 
 # all bad basic
 #for f in $(find bad/ -name '*.lat')
