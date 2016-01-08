@@ -39,7 +39,7 @@ main = do
                             putStrLn m
                         Right xs -> do
                             putStrLn "OK"
-                            putStrLn $ unlines $ map show xs
+                            --putStrLn $ unlines $ map show xs
                             writeFile llPath (unlines $ map show xs)
                             --print $ runCodeGeneration2' ast
 

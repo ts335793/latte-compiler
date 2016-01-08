@@ -710,7 +710,8 @@ reassignRegistersInBlock l = do
         return (m', i''' : is)) (bm, []) is
     setBlockInstructions l (reverse revis)
     ns <- blockOutputs <$> getGraphBlock l
-    for_ ns (\n -> updatePhiParametersInBlock n l (trace ("dla " ++ show l ++ " " ++ show m) m))
+    --for_ ns (\n -> updatePhiParametersInBlock n l (trace ("dla " ++ show l ++ " " ++ show m) m))
+    for_ ns (\n -> updatePhiParametersInBlock n l m)
 
 -- remove assignments
 
@@ -734,13 +735,17 @@ removeAssignments :: TypeValue -> GM () -- code must be in ssa
 removeAssignments l = do
     bi <- getBlockInstructions l
     let (bi', m) = help bi []
-    setBlockInstructions l (trace (show l ++ " -> " ++ show m) bi')
+    --setBlockInstructions l (trace (show l ++ " -> " ++ show m) bi')
+    setBlockInstructions l bi'
     ns <- blockOutputs <$> getGraphBlock l
-    for_ ns (\n -> updatePhiParametersInBlock' n l (M.fromList (trace ("podmiany w " ++ show l ++ ": " ++ show m) m)))
+    --for_ ns (\n -> updatePhiParametersInBlock' n l (M.fromList (trace ("podmiany w " ++ show l ++ ": " ++ show m) m)))
+    for_ ns (\n -> updatePhiParametersInBlock' n l (M.fromList m))
     where
         help :: [Instruction] -> [(TypeValue, TypeValue)] -> ([Instruction], [(TypeValue, TypeValue)])
         help [] m = ([], m)
-        help ((IAssign l r) : xs) m = help xs ((l, r) : m)
+        help ((IAssign l r) : xs) m
+            | M.member r (M.fromList m) = help xs ((l, (M.fromList m) M.! r) : m)
+            | otherwise = help xs ((l, r) : m)
         help (x : xs) m =
             let x' = foldl (\i (a, b) -> replaceAllUses i a b) x m
                 (xs', m') = help xs m
