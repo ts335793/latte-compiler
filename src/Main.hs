@@ -33,7 +33,7 @@ main = do
                     putStrLn "ERROR"
                     putStrLn $ unlines $ map show (sort xs)
                 Right () ->
-                    case runCodeGeneration2 ast of
+                    case runCodeGeneration ast of
                         Left m -> do
                             putStrLn "ERROR"
                             putStrLn m
@@ -41,5 +41,5 @@ main = do
                             putStrLn "OK"
                             --putStrLn $ unlines $ map show xs
                             writeFile llPath (unlines $ map show xs)
-                            --print $ runCodeGeneration2' ast
+                            --print $ runCodeGeneration' ast
 

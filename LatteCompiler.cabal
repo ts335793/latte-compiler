@@ -1,13 +1,13 @@
 name:                 LatteCompiler
 version:              0.1.0.0
-synopsis:             
+synopsis:
 -- description:
 -- license:
 -- license-file:
-homepage:             
+homepage:
 author:               Tomasz Steczniewski
 maintainer:           tomaszsteczniewski@gmail.com
-category:             
+category:
 -- copyright:
 build-type:           Simple
 -- extra-source-files:
@@ -17,6 +17,6 @@ executable LatteCompiler
   main-is:              Main.hs
   -- other-modules:
   -- other-extensions:
-  build-depends:        array, base >= 4.7 && < 5, cond, control-bool, containers, ghc, extra, monad-loops, mtl, MissingH, transformers
+  build-depends:        array, base >= 4.7 && < 5, cond, control-bool, containers, ghc, extra, keys, monad-loops, mtl, MissingH, transformers
   hs-source-dirs:       src
   default-language:     Haskell2010
