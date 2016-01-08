@@ -6,16 +6,7 @@
       <change type="DELETED" beforePath="$PROJECT_DIR$/mrjp-tests/good/basic/fibonacci.lat" afterPath="" />
       <change type="DELETED" beforePath="$PROJECT_DIR$/mrjp-tests/good/basic/print_complicated_string.lat" afterPath="" />
       <change type="DELETED" beforePath="$PROJECT_DIR$/mrjp-tests/good/basic/while_true2.lat" afterPath="" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/lib/runtime.bc" afterPath="$PROJECT_DIR$/lib/runtime.bc" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/Makefile" afterPath="$PROJECT_DIR$/Makefile" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/latc_llvm" afterPath="$PROJECT_DIR$/latc_llvm" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/lib/runtime.c" afterPath="$PROJECT_DIR$/lib/runtime.c" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/lib/runtime.ll" afterPath="$PROJECT_DIR$/lib/runtime.ll" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/mrjp-tests/gr5/bfs.lat" afterPath="$PROJECT_DIR$/mrjp-tests/gr5/bfs.lat" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/run_all_bad" afterPath="$PROJECT_DIR$/run_all_bad" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/CodeGeneration.hs" afterPath="$PROJECT_DIR$/src/CodeGeneration.hs" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/Main.hs" afterPath="$PROJECT_DIR$/src/Main.hs" />
-      <change type="MODIFICATION" beforePath="$PROJECT_DIR$/src/SemanticAnalysis.hs" afterPath="$PROJECT_DIR$/src/SemanticAnalysis.hs" />
     </list>
     <ignored path="LatteCompiler.iws" />
     <ignored path=".idea/workspace.xml" />
@@ -595,7 +586,7 @@
     <servers />
   </component>
   <component name="ToolWindowManager">
-    <frame x="0" y="0" width="1920" height="920" extended-state="6" />
+    <frame x="0" y="0" width="1920" height="920" extended-state="7" />
     <editor active="true" />
     <layout>
       <window_info id="Palette" active="false" anchor="right" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="3" side_tool="false" content_ui="tabs" />

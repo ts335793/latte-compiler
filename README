@@ -1,0 +1,38 @@
+Autor: Tomasz Stęczniewski ts335793
+
+Uruchamianie i kompilacja
+- kompilacja: make
+- uruchamianie: ./latc_llvm input.ll
+
+Użyte biblioteki
+array, base, cond, control-bool, containers, ghc, extra, keys, monad-loops, mtl, MissingH, transformers
+
+
+
+Analiza semantyczna
+- Traktuje inkrementację i dekrementację jako wyrażenia.
+- Akceptuje język ze wszystkimi rozszerzeniami (tablice, struktury, obiekty, metody wirtualne)
+- Akceptuje rzutowanie obiektów dowolnych typów (klasy na nad / podklasy, typy wbudowane na same siebie).
+- Traktuje null jako wartość dowolnego typu wskaźnikowego.
+- Umożliwia zmianę typów metod wirtualnych w podklasach zgodnie z kowariancją i kontrawariancją.
+- "self" w metodach jest zmienną a nie częścią semantyki (można na nią przypisywać).
+- Pola obiektów nie są widoczne w klasach dziedziczących i mogą być nadpisywane w klasach dziedziczących.
+  Można odwołać się do pól nadklasy/podklasy poprzez rzutowanie self na nadklasę/podklasę.
+- W metodach wywołanie f() najpierw przeszukuje przestrzeń metod, a później funkcji globalnych.
+- Przestrzenie nazw metod, funkcji, klas i zmiennych lokalnych są niezależne (może istnieć klasa i zmienna o nazwie x).
+- Nie sprawdza wyrażeń stałych (stąd testy bad/bad008.lat, bad/bad012.lat, bad/bad021.lat, bad/bad024.lat, bad/bad025.lat są akceptowane i kompilowane)
+
+Kompilator
+- Kompiluje programy w podstawowej wersji języka.
+- Traktuje inkrementację i dekrementację jako wyrażenia.
+- Generuje kod LLVM w postaci SSA.
+
+Funkcje wbudowane:
+void printInt(int) - wypisuje int i znak nowej linii
+void printString(string) - wypisuje string i znak nowej linii
+void error() - tak jak w treści
+int readInt() - wczytuje int i resztę linii wraz z enterem
+string readString() - wczytuje linię i enter, zwraca string bez znaku nowej linii
+
+Skompilowany program
+- W przypadku nie zwracenia wartości z funkcji wypisuje błąd na stderr i kończy wywołanie programu.
