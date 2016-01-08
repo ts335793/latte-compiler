@@ -4,22 +4,31 @@
 for f in $(find good/ -name '*.lat')
 do
 	echo $f
+  #echo ${f%.*}.bc
 	./latc_llvm $f
+  DIFF=$(lli "${f%.*}.bc" | diff "${f%.*}.output" -)
+  if [ "$DIFF" != "" ]
+  then
+    echo "RUN FAIL"
+    echo $DIFF
+  else
+    echo "RUN PASS"
+  fi
 done
 
 # all good basic
-for f in $(find extensions/ -name '*.lat')
-do
-	echo $f
-	./latc_llvm $f
-done
+#for f in $(find extensions/ -name '*.lat')
+#do
+#	echo $f
+#	./latc_llvm $f
+#done
 
 # all good basic
-for f in $(find mrjp-tests/good -name '*.lat')
-do
-	echo $f
-	./latc_llvm $f
-done
+#for f in $(find mrjp-tests/good -name '*.lat')
+#do
+#	echo $f
+#	./latc_llvm $f
+#done
 
 # all good basic
 #for f in $(find mrjp-tests/gr5 -name '*.lat')

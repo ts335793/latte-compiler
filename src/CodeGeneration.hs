@@ -622,7 +622,8 @@ aliveVariables :: Graph -> Map TypeValue (Set TypeValue)
 aliveVariables g = help (M.fromList $ map (\l -> (l, S.empty)) (M.keys $ graphBlocks g))
     where
         help :: Map TypeValue (Set TypeValue) -> Map TypeValue (Set TypeValue)
-        help p = let p' = traceShowId (inG g p)
+        help p = --let p' = traceShowId (inG g p)
+                 let p' = inG g p
                  in if' (p == p') p (help p')
 
 -- insert phi
@@ -635,7 +636,8 @@ insertPhiCalls = do
         --av1= traceShowId (inG g av)
         --av2= traceShowId (inG g av1)
     sl <- graphSource <$> getGraph
-    for_ (M.toList (traceShowId av2)) (\(l, s) ->
+    --for_ (M.toList (traceShowId av2)) (\(l, s) ->
+    for_ (M.toList av2) (\(l, s) ->
         unless (l == sl)
             (do bi <- getBlockInstructions l
                 let bi' = (map (\x -> IPhi x x []) (S.toList s)) ++ bi
@@ -696,19 +698,19 @@ reassignRegistersInBlock l = do
     is <- getBlockInstructions l
     sl <- graphSource <$> getGraph
     bm <- if' (l == sl)
-        (map (\x -> (x, x)) . graphParameters <$> getGraph)
-        (return [])
+        (M.fromList . map (\x -> (x, x)) . graphParameters <$> getGraph)
+        (return M.empty)
     (m, revis) <- foldlM (\(m, is) i -> do
         (m', i') <- case getLeftSide i of
                 Nothing -> return (m, i)
                 Just r@(t, _) -> do
                     nr <- newRegister t
-                    return ((r, nr) : m, replaceLeftSides i r nr)
-        let i''' = foldl (\i'' (r, nr) -> replaceAllUsesButPhi i'' r nr) i' m
+                    return (M.insert r nr m, replaceLeftSides i r nr)
+        let i''' = foldl (\i'' (r, nr) -> replaceAllUsesButPhi i'' r nr) i' (M.toList m)
         return (m', i''' : is)) (bm, []) is
     setBlockInstructions l (reverse revis)
     ns <- blockOutputs <$> getGraphBlock l
-    for_ ns (\n -> updatePhiParametersInBlock n l (M.fromList m))
+    for_ ns (\n -> updatePhiParametersInBlock n l (trace ("dla " ++ show l ++ " " ++ show m) m))
 
 {-reassignRegistersInBlock :: TypeValue -> GM ()
 reassignRegistersInBlock l = do
@@ -748,7 +750,8 @@ getFunctionCode n f = do
     --graphToInstructions n <$> getGraph
     mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
     ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
-    removeAssignments (traceShowId ps) . graphToInstructions n <$> getGraph
+    removeAssignments ps . graphToInstructions n <$> getGraph
+    --removeAssignments (traceShowId ps) . graphToInstructions n <$> getGraph
     --graphToInstructions n <$> getGraph
 
 -- collect definitions

@@ -41,5 +41,5 @@ main = do
                             putStrLn "OK"
                             putStrLn $ unlines $ map show xs
                             writeFile llPath (unlines $ map show xs)
-                            print $ runCodeGeneration2' ast
+                            --print $ runCodeGeneration2' ast
 
