@@ -25,8 +25,13 @@ Kompilator
 - Traktuje inkrementację i dekrementację jako wyrażenia.
 - Obsługuje operatory relacyjne dla napisów.
 - Generuje kod LLVM w postaci SSA.
+- Zwija stałe typu int i bool.
+- Usuwa nieosiągalne bloki.
+- Usuwa nieosiągalne instrukcje.
+- Usuwa martwe zmienne.
+- Usuwa nieosiągalne skoki.
 
-Funkcje wbudowane:
+Funkcje wbudowane
 void printInt(int) - wypisuje int i znak nowej linii
 void printString(string) - wypisuje string i znak nowej linii
 void error() - tak jak w treści

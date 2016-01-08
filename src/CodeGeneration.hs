@@ -100,6 +100,7 @@ defaultValue TVoid = VVoid
 type TypeValue = (Type, Value)
 
 data BinOp = BAdd | BSub | BMul | BDiv | BMod
+           deriving Eq
 
 instance Show BinOp where
     show BAdd = "add"
@@ -109,6 +110,7 @@ instance Show BinOp where
     show BMod = "srem"
 
 data RelOp = RLt | RLe | REq | RNe | RGe | RGt
+           deriving Eq
 
 instance Show RelOp where
     show RLt = "slt"
@@ -132,6 +134,7 @@ data Instruction = IBin TypeValue TypeValue BinOp TypeValue
                  | IStringConstant TypeValue String
                  | IDeclare Type String [Type]
                  | IPhi TypeValue [(TypeValue, TypeValue)]
+                 deriving Eq
 
 showTypeValues :: [TypeValue] -> String
 showTypeValues [] = ""
@@ -266,6 +269,11 @@ setGraphBlock :: TypeValue -> Block -> GM ()
 setGraphBlock l b = do
     g <- getGraph
     setGraph g { graphBlocks = M.insert l b (graphBlocks g) }
+
+removeGraphBlock :: TypeValue -> GM ()
+removeGraphBlock l = do
+    g <- getGraph
+    setGraph g { graphBlocks = M.delete l (graphBlocks g) }
 
 addGraphEdge :: TypeValue -> TypeValue -> GM ()
 addGraphEdge l1 l2 = do
@@ -478,7 +486,7 @@ genExpr (EMetCall e (PIdent (_, m)) args) = notImplemented "EMetCall"
 genExpr (EAt e1 e2) = notImplemented "EAt"
 genExpr (EApp p@(PIdent (_, f)) args) = do -- no arguments cast and methods call
     TFun argts rt <- functionType <$> getFunction f
-    r <- newRegister rt
+    r <- if' (rt == TVoid) (return (TVoid, VVoid)) (newRegister rt)
     argtvs <- mapM genExpr args
     emit $ ICall r f argtvs
     return r
@@ -643,7 +651,7 @@ killSetInstruction :: Instruction -> Set TypeValue
 killSetInstruction = S.fromList . leftSideInstruction
 
 useSetInstruction :: Instruction -> Set TypeValue
-useSetInstruction = S.fromList . filter (isRegisterValue . snd) . reduceInstruction (const []) (\x -> [x]) (const [])
+useSetInstruction = S.fromList . filter (isRegisterValue . snd) . reduceInstruction (const []) (singleton) (\(x, y) -> [x, y])
 
 inSetInstruction :: Instruction -> Set TypeValue -> Set TypeValue
 inSetInstruction i o = (o `S.difference` killSetInstruction i) `S.union` useSetInstruction i
@@ -749,24 +757,118 @@ removeAssignments l = do
                 (is1, m1) = help is m
             in (i2 : is1, m1)
 
--- fold constants
-
-{-foldConstants :: [Instruction] -> [Instruction]
-foldConstants xs = map calculate xs
-    where
-        calculate :: Instruction -> Instruction
-        calculate-}
-
 -- all function
 
-getFunctionCode :: String -> Function -> GM [Instruction]
-getFunctionCode n f = do
+genSSAFunctionCode :: String -> Function -> GM [Instruction]
+genSSAFunctionCode n f = do
     is <- genFunction n f
     createGraphFromInstructions is
     insertPhiCalls
     mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
     mapM_ removeAssignments . M.keys =<< getGraphBlocks
     graphToInstructions n <$> getGraph
+
+-- fold constants
+
+foldConstants :: [Instruction] -> [Instruction]
+foldConstants xs = map help xs
+    where
+        help :: Instruction -> Instruction
+        help (IBin l (TInt, VInt v1) BAdd (TInt, VInt v2)) = IAssign l (TInt, VInt $ v1 + v2)
+        help (IBin l (TInt, VInt v1) BSub (TInt, VInt v2)) = IAssign l (TInt, VInt $ v1 - v2)
+        help (IBin l (TInt, VInt v1) BMul (TInt, VInt v2)) = IAssign l (TInt, VInt $ v1 * v2)
+        help (IBin l (TInt, VInt v1) BDiv (TInt, VInt v2)) = IAssign l (TInt, VInt $ v1 `div` v2)
+        help (IBin l (TInt, VInt v1) BMod (TInt, VInt v2)) = IAssign l (TInt, VInt $ v1 `rem` v2)
+        help (ICmp l (TInt, VInt v1) RLt (TInt, VInt v2)) = IAssign l (TBool, VBool $ v1 < v2)
+        help (ICmp l (TInt, VInt v1) RLe (TInt, VInt v2)) = IAssign l (TBool, VBool $ v1 <= v2)
+        help (ICmp l (TInt, VInt v1) REq (TInt, VInt v2)) = IAssign l (TBool, VBool $ v1 == v2)
+        help (ICmp l (TInt, VInt v1) RNe (TInt, VInt v2)) = IAssign l (TBool, VBool $ v1 /= v2)
+        help (ICmp l (TBool, VBool v1) REq (TBool, VBool v2)) = IAssign l (TBool, VBool $ v1 == v2)
+        help (ICmp l (TBool, VBool v1) RNe (TBool, VBool v2)) = IAssign l (TBool, VBool $ v1 /= v2)
+        help (ICmp l (TInt, VInt v1) RGe (TInt, VInt v2)) = IAssign l (TBool, VBool $ v1 >= v2)
+        help (ICmp l (TInt, VInt v1) RGt (TInt, VInt v2)) = IAssign l (TBool, VBool $ v1 > v2)
+        help x = x
+
+-- remove unreachable blocks
+
+removeLabelFromPhiCalls :: TypeValue -> TypeValue -> GM ()
+removeLabelFromPhiCalls l n = do
+    is <- getBlockInstructions l
+    let is1 = foldr help [] is
+    setBlockInstructions l is1
+    where
+        help :: Instruction -> [Instruction] -> [Instruction]
+        help (IPhi nx xs) acc =
+            let xs1 = filter ((n /= ) . snd) xs in
+            case xs1 of
+                [] -> acc
+                xs1 -> (IPhi nx xs1) : acc
+        help x acc = x : acc
+
+-- remove unreachable blocks
+
+removeUnreachableBlocks :: GM ()
+removeUnreachableBlocks = do
+    sl <- getGraphSource
+    rs <- help $ S.singleton sl
+    bs <- S.fromList . M.keys <$> getGraphBlocks
+    for_ (bs `S.difference` rs) (\l -> do
+        mapM_ (\n -> removeLabelFromPhiCalls n l) =<< getBlockOutputs l
+        mapM_ (removeGraphEdge l) =<< getBlockOutputs l)
+    for_ (bs `S.difference` rs) removeGraphBlock
+    where
+        help :: Set TypeValue -> GM (Set TypeValue)
+        help s = do
+            n <- mconcat <$> mapM getBlockOutputs (S.toList s)
+            let s1 = s `S.union` (S.fromList n)
+            if' (s1 == s) (return s1) (help s1)
+
+-- reduce jumps
+
+removeLinks :: GM ()
+removeLinks = do
+    bs <- M.keys <$> getGraphBlocks
+    for_ bs (\l -> do
+        is <- getBlockInstructions l
+        let isbl = take (length is - 1) is
+        case last is of
+            IBr [(TBool, VBool True), a, b] -> do
+                setBlockInstructions l (isbl ++ [IBr [a]])
+                removeLabelFromPhiCalls b l
+                removeGraphEdge l b
+            IBr [(TBool, VBool False), a, b] -> do
+                setBlockInstructions l (isbl ++ [IBr [b]])
+                removeLabelFromPhiCalls a l
+                removeGraphEdge l a
+            _ -> return ())
+
+-- remove dead variables
+
+removeDeadVariables :: GM ()
+removeDeadVariables = do
+    av <- aliveVariables <$> getGraph
+    bs <- M.keys <$> getGraphBlocks
+    for_ (bs) (\l -> do
+        is <- getBlockInstructions l
+        os <- getBlockOutputs l
+        let bout = mconcat $ map (av M.!) os
+        let (_, bi1) = foldr (\i (av1, is1) ->
+                (inSetInstruction i av1, case leftSideInstruction i of
+                    [] ->  i : is1
+                    [r] -> if' (S.member r av1) [i] [] ++ is1)) (bout, []) is
+        setBlockInstructions l bi1)
+
+-- improve ssa code
+
+improveSSAFunctionCode :: String -> [Instruction] -> GM [Instruction]
+improveSSAFunctionCode n is = do
+    createGraphFromInstructions $ foldConstants is
+    mapM_ removeAssignments . M.keys =<< getGraphBlocks
+    removeDeadVariables
+    removeLinks
+    removeUnreachableBlocks
+    is1 <- graphToInstructions n <$> getGraph
+    if' (is == is1) (return is) (improveSSAFunctionCode n is1)
 
 -- collect definitions
 
@@ -791,7 +893,7 @@ getDefsInClsDef c (MetDef brt (PIdent (_, i)) args b) = notImplemented "MetDef"
 codeGeneration :: Program -> GM [Instruction]
 codeGeneration p = do
     getDefsInProgram p
-    is1 <- concatMapM (uncurry getFunctionCode) . filter (\(k,_) -> not (M.member k builtInFunctions)) . M.toList =<< getFunctions
+    is1 <- concatMapM (\(l, f) -> do is <- genSSAFunctionCode l f; improveSSAFunctionCode l is) . filter (\(k,_) -> not (M.member k builtInFunctions)) . M.toList =<< getFunctions
     is2 <- map (\(s, tv) -> IStringConstant tv s) . M.toList <$> getStringConstants
     let is3 = map (\(s, Function _ _ (TFun argts rt) _) -> IDeclare rt s argts) (M.toList builtInFunctions)
     return $ is1 ++ is2 ++ is3
