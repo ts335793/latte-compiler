@@ -712,32 +712,39 @@ reassignRegistersInBlock l = do
     ns <- blockOutputs <$> getGraphBlock l
     for_ ns (\n -> updatePhiParametersInBlock n l (trace ("dla " ++ show l ++ " " ++ show m) m))
 
-{-reassignRegistersInBlock :: TypeValue -> GM ()
-reassignRegistersInBlock l = do
-    is <- getBlockInstructions l
-    let rs = S.toList $ foldl (\acc i -> acc `S.union` getLeftSide i) S.empty is
-    m' <- mapM (\r@(t, _) -> do
-        nr <- newRegister t
-        return (r, nr)) rs
-    sl <- graphSource <$> getGraph
-    ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
-    let m = if'(sl == l) (m' ++ ps) m'
-    let is' = map (\i -> foldl (\i' (r, nr) -> replaceAllUsesButPhi i' r nr) i m) is
-    setBlockInstructions l is'
-    ns <- blockOutputs <$> getGraphBlock l
-    for_ ns (\n -> updatePhiParametersInBlock n l (M.fromList m)) --bug -}
-
 -- remove assignments
 
-removeAssignments :: [(TypeValue, TypeValue)] -> [Instruction] -> [Instruction]
-removeAssignments m is = help is m
+updatePhiParametersInBlock' :: TypeValue -> TypeValue -> Map TypeValue TypeValue -> GM ()
+updatePhiParametersInBlock' l n m = do
+    bi <- getBlockInstructions l
+    let bi' = foldr help [] bi
+    setBlockInstructions l bi'
     where
-        help :: [Instruction] -> [(TypeValue, TypeValue)] -> [Instruction]
-        help [] _ = []
+        help :: Instruction -> [Instruction] -> [Instruction]
+        help (IPhi nx ox xs) acc = IPhi nx ox (help2 xs) : acc
+        help x acc = x:acc
+
+        help2 :: [(TypeValue, TypeValue)] -> [(TypeValue, TypeValue)]
+        help2 [] = []
+        help2 ((a, b):xs)
+            | b == n && M.member a m = (m M.! a, n) : help2 xs
+            | otherwise = (a, b) : help2 xs
+
+removeAssignments :: TypeValue -> GM () -- code must be in ssa
+removeAssignments l = do
+    bi <- getBlockInstructions l
+    let (bi', m) = help bi []
+    setBlockInstructions l (trace (show l ++ " -> " ++ show m) bi')
+    ns <- blockOutputs <$> getGraphBlock l
+    for_ ns (\n -> updatePhiParametersInBlock' n l (M.fromList (trace ("podmiany w " ++ show l ++ ": " ++ show m) m)))
+    where
+        help :: [Instruction] -> [(TypeValue, TypeValue)] -> ([Instruction], [(TypeValue, TypeValue)])
+        help [] m = ([], m)
         help ((IAssign l r) : xs) m = help xs ((l, r) : m)
         help (x : xs) m =
             let x' = foldl (\i (a, b) -> replaceAllUses i a b) x m
-            in x' : help xs m
+                (xs', m') = help xs m
+            in (x' : xs', m')
 
 -- all function
 
@@ -749,10 +756,11 @@ getFunctionCode n f = do
     insertPhiCalls
     --graphToInstructions n <$> getGraph
     mapM_ reassignRegistersInBlock . M.keys =<< getGraphBlocks
-    ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
-    removeAssignments ps . graphToInstructions n <$> getGraph
+    mapM_ removeAssignments . M.keys =<< getGraphBlocks
+    --ps <- map (\x -> (x, x)) . graphParameters <$> getGraph
+    --removeAssignments ps . graphToInstructions n <$> getGraph
     --removeAssignments (traceShowId ps) . graphToInstructions n <$> getGraph
-    --graphToInstructions n <$> getGraph
+    graphToInstructions n <$> getGraph
 
 -- collect definitions
 

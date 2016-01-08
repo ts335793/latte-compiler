@@ -15,7 +15,7 @@ then
   llvm-link -o "${1%.*}.bc" "${1%.*}_tmp.bc" lib/runtime.bc
   rm "${1%.*}_tmp.bc"
   #echo "running..."
-  #lli "${1%.*}.bc"
+  echo lli "${1%.*}.bc"
   #echo "ended..."
   DIFF=$(lli "${1%.*}.bc" | diff "${1%.*}.output" -)
   if [ "$DIFF" != "" ]
